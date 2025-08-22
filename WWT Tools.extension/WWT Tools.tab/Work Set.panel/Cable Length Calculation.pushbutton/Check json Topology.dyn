@@ -1,0 +1,362 @@
+{
+  "Uuid": "c19a1c60-39e9-4ef2-a94a-ae4bf582e294",
+  "IsCustomNode": false,
+  "Description": "",
+  "Name": "Check json Topology",
+  "ElementResolver": {
+    "ResolutionMap": {}
+  },
+  "Inputs": [],
+  "Outputs": [],
+  "Nodes": [
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "import json\r\nimport clr\r\nclr.AddReference('ProtoGeometry')\r\nfrom Autodesk.DesignScript.Geometry import Point, Line\r\n\r\n# IN[0] = path to the JSON file\r\njson_path = IN[0]\r\n\r\n# Read and parse JSON\r\nwith open(json_path, 'r') as f:\r\n    data = json.load(f)\r\n\r\nvertices = data[\"vertices\"]\r\nedges = data[\"edges\"]\r\n\r\n# Create Dynamo points for each vertex\r\npoints = [Point.ByCoordinates(*v) for v in vertices]\r\n\r\n# Create lines for each edge\r\nlines = []\r\nfor e in edges:\r\n    i, j = e\r\n    p1 = points[i]\r\n    p2 = points[j]\r\n    lines.append(Line.ByStartPointEndPoint(p1, p2))\r\n\r\n# Output points and lines to Dynamo\r\nOUT = points, lines",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "69c3e99629aa4e98815d8d836dbe427b",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "cab1d9615c20440e97bf4ba644b85bed",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "5d898899be044fb3ac364611f7dd0378",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.Filename, CoreNodeModels",
+      "Id": "f2a6cc4f700a46efac606122dddcbfb1",
+      "NodeType": "ExtensionNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "5d980878a48c406fae570ef1afd57716",
+          "Name": "",
+          "Description": "File Path",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Allows you to select a file on the system and returns its file path",
+      "HintPath": "C:\\WWT Tools.extension\\revit-mcp-python.extension\\WWT Tools.tab\\Development.panel\\DEV.pulldown\\Cable Length Calculation.pushbutton\\topologic.JSON",
+      "InputValue": ".\\topologic.JSON"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "d1f187494a374f80b2d157b8c4d0cb29",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "97e50d7dd32b499a9edfe1c55f4927e6",
+          "Name": "topologies",
+          "Description": "A set of Topologies\n\nTopology[]",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "eaae257d963840f4af981885e5c0eb53",
+          "Name": "Cluster",
+          "Description": "The created Cluster",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "Topologic.Cluster.ByTopologies@Topologic.Topology[]",
+      "Replication": "Auto",
+      "Description": "Creates a Cluster by a set of Topologies.\n\nCluster.ByTopologies (topologies: Topology[]): Cluster"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "547b393a6c8b4b8f9e53a5cb442dfb97",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "2e4dbf70b9ad4bb997d9c6a1a927c8bf",
+          "Name": "geometry",
+          "Description": "A geometry\n\nGeometry",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "fad72d8099c9493c9c3ff8814911040b",
+          "Name": "tolerance",
+          "Description": "A positive tolerance value\n\ndouble\nDefault value : 0.0001",
+          "UsingDefaultValue": true,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "68305145c4754cabb2472a965f3b5138",
+          "Name": "Topology",
+          "Description": "The created Topology",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "Topologic.Topology.ByGeometry@Autodesk.DesignScript.Geometry.Geometry,double",
+      "Replication": "Auto",
+      "Description": "Creates a Topology by geometry.\n\nTopology.ByGeometry (geometry: Geometry, tolerance: double = 0.0001): Topology"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "120a34338baf42129e287b3e3be09498",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "4e1287e8d8c94e42af89cf25751a903e",
+          "Name": "topology",
+          "Description": "Topologic.Topology",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "3f89a52d54c142248b3bf0b2ecc2ecda",
+          "Name": "Topology",
+          "Description": "The result of the SelfMerge operation",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "Topologic.Topology.SelfMerge",
+      "Replication": "Auto",
+      "Description": "Merges the sub-topologies of the input Topology.\n\nTopology.SelfMerge ( ): Topology"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "b82d395c87ac4d8280d8529ed564186a",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "c626775971cd437ca5e84b4f8d8a905b",
+          "Name": "topology",
+          "Description": "Topologic.Topology",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "256c9b2fee944b2b885a526fd38783c5",
+          "Name": "Wire[]",
+          "Description": "A list of Wires constituent to the Topology",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "Topologic.Topology.Wires",
+      "Replication": "Auto",
+      "Description": "Returns the Wires constituent to the Topology.\n\nTopology.Wires: Wire[]"
+    }
+  ],
+  "Connectors": [
+    {
+      "Start": "5d898899be044fb3ac364611f7dd0378",
+      "End": "2e4dbf70b9ad4bb997d9c6a1a927c8bf",
+      "Id": "ef6752beae704a46b704398f246d91c3",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "5d980878a48c406fae570ef1afd57716",
+      "End": "cab1d9615c20440e97bf4ba644b85bed",
+      "Id": "0de0af7eb4944cdaae8dbe2e3448dcc2",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "eaae257d963840f4af981885e5c0eb53",
+      "End": "4e1287e8d8c94e42af89cf25751a903e",
+      "Id": "3b35ce9fe36c48b99f0ee13e3da9529e",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "68305145c4754cabb2472a965f3b5138",
+      "End": "97e50d7dd32b499a9edfe1c55f4927e6",
+      "Id": "eeeb14b30f104ec5803e3385156d3de0",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "3f89a52d54c142248b3bf0b2ecc2ecda",
+      "End": "c626775971cd437ca5e84b4f8d8a905b",
+      "Id": "6a4a767529d649cdbeeefd4431a11659",
+      "IsHidden": "False"
+    }
+  ],
+  "Dependencies": [],
+  "NodeLibraryDependencies": [
+    {
+      "Name": "Topologic",
+      "Version": "1.4.0",
+      "ReferenceType": "Package",
+      "Nodes": [
+        "d1f187494a374f80b2d157b8c4d0cb29",
+        "547b393a6c8b4b8f9e53a5cb442dfb97",
+        "120a34338baf42129e287b3e3be09498",
+        "b82d395c87ac4d8280d8529ed564186a"
+      ]
+    },
+    {
+      "Name": "topologic.JSON",
+      "ReferenceType": "External",
+      "Nodes": [
+        "f2a6cc4f700a46efac606122dddcbfb1"
+      ]
+    }
+  ],
+  "EnableLegacyPolyCurveBehavior": true,
+  "Thumbnail": "",
+  "GraphDocumentationURL": null,
+  "ExtensionWorkspaceData": [
+    {
+      "ExtensionGuid": "28992e1d-abb9-417f-8b1b-05e053bee670",
+      "Name": "Properties",
+      "Version": "3.5",
+      "Data": {}
+    },
+    {
+      "ExtensionGuid": "DFBD9CC0-DB40-457A-939E-8C8555555A9D",
+      "Name": "Generative Design",
+      "Version": "9.1",
+      "Data": {}
+    }
+  ],
+  "Author": "",
+  "Linting": {
+    "activeLinter": "None",
+    "activeLinterId": "7b75fb44-43fd-4631-a878-29f4d5d8399a",
+    "warningCount": 0,
+    "errorCount": 0
+  },
+  "Bindings": [],
+  "View": {
+    "Dynamo": {
+      "ScaleFactor": 1.0,
+      "HasRunWithoutCrash": true,
+      "IsVisibleInDynamoLibrary": true,
+      "Version": "3.5.2.8914",
+      "RunType": "Manual",
+      "RunPeriod": "1000"
+    },
+    "Camera": {
+      "Name": "_Background Preview",
+      "EyeX": 63.798866271972656,
+      "EyeY": 30.36150550842285,
+      "EyeZ": -41.235137939453125,
+      "LookX": -87.4976806640625,
+      "LookY": -44.70732116699219,
+      "LookZ": 15.392402648925781,
+      "UpX": -0.24381768703460693,
+      "UpY": 0.9688721895217896,
+      "UpZ": 0.04289206489920616
+    },
+    "ConnectorPins": [],
+    "NodeViews": [
+      {
+        "Id": "69c3e99629aa4e98815d8d836dbe427b",
+        "Name": "Python Script",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 4.74906049763581,
+        "Y": -16.25351880170612
+      },
+      {
+        "Id": "f2a6cc4f700a46efac606122dddcbfb1",
+        "Name": "File Path",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": -231.56822439293342,
+        "Y": -18.358857139937953
+      },
+      {
+        "Id": "d1f187494a374f80b2d157b8c4d0cb29",
+        "Name": "Cluster.ByTopologies",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 527.6843727615415,
+        "Y": -15.877932824104136
+      },
+      {
+        "Id": "547b393a6c8b4b8f9e53a5cb442dfb97",
+        "Name": "Topology.ByGeometry",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 243.38572910396795,
+        "Y": -25.2504155820462
+      },
+      {
+        "Id": "120a34338baf42129e287b3e3be09498",
+        "Name": "Topology.SelfMerge",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 803.4049991819766,
+        "Y": -11.178266154156944
+      },
+      {
+        "Id": "b82d395c87ac4d8280d8529ed564186a",
+        "Name": "Topology.Wires",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 950.2405623897346,
+        "Y": 328.57423382123966
+      }
+    ],
+    "Annotations": [],
+    "X": 279.5769377817325,
+    "Y": 46.87468235928685,
+    "Zoom": 0.8535625198372361
+  }
+}

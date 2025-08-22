@@ -1,0 +1,389 @@
+{
+  "Uuid": "4647ae1c-09fa-4a19-b613-04ba777932e2",
+  "IsCustomNode": false,
+  "Description": "",
+  "Name": "Check results",
+  "ElementResolver": {
+    "ResolutionMap": {}
+  },
+  "Inputs": [],
+  "Outputs": [],
+  "Nodes": [
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# Dynamo Python Script: Topologic Cable Path Results Reader\r\n# Reads topologic_results.json and outputs three separate outputs for Dynamo node:\r\n#   OUT[0]: list of Element IDs\r\n#   OUT[1]: list of Path Lengths\r\n#   OUT[2]: list of Path Edges (list of [start, end] pairs)\r\n# Author: JacksonPinto\r\n\r\nimport json\r\nimport os\r\n\r\ndef path_to_edges(path_xyz):\r\n    \"\"\"Convert a list of points into a list of edges (pairs of points).\"\"\"\r\n    edges = []\r\n    for i in range(len(path_xyz)-1):\r\n        pt1 = path_xyz[i]\r\n        pt2 = path_xyz[i+1]\r\n        edges.append([pt1, pt2])\r\n    return edges\r\n\r\n# --- Dynamo Input ---\r\njsonFilePath = IN[0]\r\n\r\nif not os.path.exists(jsonFilePath):\r\n    raise Exception(\"File does not exist: {}\".format(jsonFilePath))\r\n\r\nwith open(jsonFilePath, 'r') as f:\r\n    results = json.load(f)\r\n\r\nelement_ids = []\r\npath_lengths = []\r\npath_edges = []\r\n\r\nfor res in results:\r\n    eid = res.get(\"element_id\")\r\n    length = res.get(\"length\")\r\n    path_xyz = res.get(\"vertex_path_xyz\", [])\r\n    element_ids.append(eid)\r\n    path_lengths.append(length)\r\n    if path_xyz and len(path_xyz) > 1:\r\n        path_edges.append(path_to_edges(path_xyz))\r\n    else:\r\n        path_edges.append([])\r\n\r\n# --- 3 SEPARATE OUTPUTS for Dynamo ---\r\nOUT = element_ids, path_lengths, path_edges",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "a3da332a5f734ee4be38558cd4a927d1",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "1aa03ec3a8dd45ec98109d5d7978ef02",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "483a79e11f1d4b9cb98f21b40c17d7b7",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.Filename, CoreNodeModels",
+      "Id": "799fc1cbb7854710aaa3eba402632732",
+      "NodeType": "ExtensionNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "697d491f951b4834b9f26eb566b3b5dc",
+          "Name": "",
+          "Description": "File Path",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Allows you to select a file on the system and returns its file path",
+      "HintPath": "C:\\WWT Tools.extension\\revit-mcp-python.extension\\WWT Tools.tab\\Development.panel\\DEV.pulldown\\Cable Length Calculation.pushbutton\\topologic_results.json",
+      "InputValue": "C:\\WWT Tools.extension\\revit-mcp-python.extension\\WWT Tools.tab\\Development.panel\\DEV.pulldown\\Cable Length Calculation.pushbutton\\topologic_results.json"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "9f8cd8b7b1674cea9105e090838508dc",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "8e28dab05ed74bacb63086cc5457188b",
+          "Name": "list",
+          "Description": "List to fetch an item from.\n\nvar[]..[]",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "4307da59d74e435785a4f539f15672d9",
+          "Name": "index",
+          "Description": "Index of the item to be fetched.\n\nint",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "d33d30b62efb42f88194021117972ea9",
+          "Name": "item",
+          "Description": "Item in the list at the given index.",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "DSCore.List.GetItemAtIndex@var[]..[],int",
+      "Replication": "Auto",
+      "Description": "Returns an item from the given list that's located at the specified index.\n\nList.GetItemAtIndex (list: var[]..[], index: int): var[]..[]"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.CodeBlockNodeModel, DynamoCore",
+      "Id": "b2b7949d69e949fe9a9456d85eee7ef7",
+      "NodeType": "CodeBlockNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "6d4b53f308b6428ab105de29457a537c",
+          "Name": "",
+          "Description": "Value of expression at line 1",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "d53c570730a1423f8f91f69de8fe522b",
+          "Name": "",
+          "Description": "Value of expression at line 2",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "26fc09b8efb749d2943e10b12ad61773",
+          "Name": "",
+          "Description": "Value of expression at line 3",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Allows for DesignScript code to be authored directly",
+      "Code": "[0];\n[1];\n[2];"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "cd3afbe49f12494c81ef8b686e3dc54d",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "100e6375cfc542e4b8cc4b35f26225f3",
+          "Name": "list",
+          "Description": "List to fetch an item from.\n\nvar[]..[]",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "c7ed55249b1c446e807b5d271293b701",
+          "Name": "index",
+          "Description": "Index of the item to be fetched.\n\nint",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "987a83e938e84402b7bed7b316cf675e",
+          "Name": "item",
+          "Description": "Item in the list at the given index.",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "DSCore.List.GetItemAtIndex@var[]..[],int",
+      "Replication": "Auto",
+      "Description": "Returns an item from the given list that's located at the specified index.\n\nList.GetItemAtIndex (list: var[]..[], index: int): var[]..[]"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "Id": "a38f6684717a41cc926db34182c9d463",
+      "NodeType": "FunctionNode",
+      "Inputs": [
+        {
+          "Id": "bb6bd4c8339343c989becc09df8b988e",
+          "Name": "list",
+          "Description": "List to fetch an item from.\n\nvar[]..[]",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "bbfbd370b0e242dcaeb1518c5ff8aba7",
+          "Name": "index",
+          "Description": "Index of the item to be fetched.\n\nint",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "8f6ffe46d9b14be5a5cb3f6082723674",
+          "Name": "item",
+          "Description": "Item in the list at the given index.",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "FunctionSignature": "DSCore.List.GetItemAtIndex@var[]..[],int",
+      "Replication": "Auto",
+      "Description": "Returns an item from the given list that's located at the specified index.\n\nList.GetItemAtIndex (list: var[]..[], index: int): var[]..[]"
+    }
+  ],
+  "Connectors": [
+    {
+      "Start": "483a79e11f1d4b9cb98f21b40c17d7b7",
+      "End": "8e28dab05ed74bacb63086cc5457188b",
+      "Id": "d73e63622cdf4b32901f0bb78fa1161b",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "483a79e11f1d4b9cb98f21b40c17d7b7",
+      "End": "100e6375cfc542e4b8cc4b35f26225f3",
+      "Id": "6ad87335f1474ebe9e8777ff083b0f71",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "483a79e11f1d4b9cb98f21b40c17d7b7",
+      "End": "bb6bd4c8339343c989becc09df8b988e",
+      "Id": "85246d0d165e4444bbced0319f35a120",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "697d491f951b4834b9f26eb566b3b5dc",
+      "End": "1aa03ec3a8dd45ec98109d5d7978ef02",
+      "Id": "f6b4334b75ed4043816ce69d72d39ece",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "6d4b53f308b6428ab105de29457a537c",
+      "End": "4307da59d74e435785a4f539f15672d9",
+      "Id": "3de131f6fa334e9dbed6547e43a7826d",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "d53c570730a1423f8f91f69de8fe522b",
+      "End": "c7ed55249b1c446e807b5d271293b701",
+      "Id": "541b393fbfd94dc5bf9a3f77847025a7",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "26fc09b8efb749d2943e10b12ad61773",
+      "End": "bbfbd370b0e242dcaeb1518c5ff8aba7",
+      "Id": "733f3477cd21433eb6d7da213072d06c",
+      "IsHidden": "False"
+    }
+  ],
+  "Dependencies": [],
+  "NodeLibraryDependencies": [
+    {
+      "Name": "topologic_results.json",
+      "ReferenceType": "External",
+      "Nodes": [
+        "799fc1cbb7854710aaa3eba402632732"
+      ]
+    }
+  ],
+  "EnableLegacyPolyCurveBehavior": null,
+  "Thumbnail": "",
+  "GraphDocumentationURL": null,
+  "ExtensionWorkspaceData": [
+    {
+      "ExtensionGuid": "28992e1d-abb9-417f-8b1b-05e053bee670",
+      "Name": "Properties",
+      "Version": "3.5",
+      "Data": {}
+    },
+    {
+      "ExtensionGuid": "DFBD9CC0-DB40-457A-939E-8C8555555A9D",
+      "Name": "Generative Design",
+      "Version": "9.1",
+      "Data": {}
+    }
+  ],
+  "Author": "",
+  "Linting": {
+    "activeLinter": "None",
+    "activeLinterId": "7b75fb44-43fd-4631-a878-29f4d5d8399a",
+    "warningCount": 0,
+    "errorCount": 0
+  },
+  "Bindings": [],
+  "View": {
+    "Dynamo": {
+      "ScaleFactor": 1.0,
+      "HasRunWithoutCrash": true,
+      "IsVisibleInDynamoLibrary": true,
+      "Version": "3.5.2.8914",
+      "RunType": "Manual",
+      "RunPeriod": "1000"
+    },
+    "Camera": {
+      "Name": "_Background Preview",
+      "EyeX": -17.0,
+      "EyeY": 24.0,
+      "EyeZ": 50.0,
+      "LookX": 12.0,
+      "LookY": -13.0,
+      "LookZ": -58.0,
+      "UpX": 0.0,
+      "UpY": 1.0,
+      "UpZ": 0.0
+    },
+    "ConnectorPins": [],
+    "NodeViews": [
+      {
+        "Id": "a3da332a5f734ee4be38558cd4a927d1",
+        "Name": "Python Script",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": false,
+        "X": 693.3333333333333,
+        "Y": 22.666666666666714
+      },
+      {
+        "Id": "799fc1cbb7854710aaa3eba402632732",
+        "Name": "File Path",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 24.0,
+        "Y": 23.33333333333323
+      },
+      {
+        "Id": "9f8cd8b7b1674cea9105e090838508dc",
+        "Name": "List.GetItemAtIndex",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1127.7805930896384,
+        "Y": 21.11159386631155
+      },
+      {
+        "Id": "b2b7949d69e949fe9a9456d85eee7ef7",
+        "Name": "Code Block",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 918.4527057134976,
+        "Y": 127.29240630348414
+      },
+      {
+        "Id": "cd3afbe49f12494c81ef8b686e3dc54d",
+        "Name": "List.GetItemAtIndex",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1125.330935602922,
+        "Y": 170.3488112898416
+      },
+      {
+        "Id": "a38f6684717a41cc926db34182c9d463",
+        "Name": "List.GetItemAtIndex",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1123.1959856101018,
+        "Y": 318.0804937083456
+      }
+    ],
+    "Annotations": [],
+    "X": -226.98733015900098,
+    "Y": 205.44205956574098,
+    "Zoom": 0.739334893999689
+  }
+}
