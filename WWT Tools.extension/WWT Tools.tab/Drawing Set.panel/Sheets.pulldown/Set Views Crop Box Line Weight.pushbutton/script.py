@@ -12,8 +12,8 @@ for v in views:
     try:
         if v.get_Parameter(DB.BuiltInParameter.VIEWER_SHEET_NUMBER).AsString() != '':
             views_on_sheet.append(v)
-    except:
-        pass
+    except (AttributeError, Exception):
+        pass  # View might not have the sheet parameter
 selected_views = forms.SelectFromList.show(
     views_on_sheet, button_name='Select Views', multiselect=True, name_attr='Name')
 
