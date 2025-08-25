@@ -26,8 +26,8 @@ for el in FilteredElementCollector(doc, doc.ActiveView.Id).WhereElementIsNotElem
     try:
         if el.Category:
             categories.add(el.Category.Name)
-    except:
-        pass
+    except AttributeError:
+        pass  # Element might not have a category
 categories = sorted(categories)
 selected_cat = forms.SelectFromList.show(categories, title="Select Category to Update", multiselect=False)
 if not selected_cat:

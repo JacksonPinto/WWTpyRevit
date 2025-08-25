@@ -15,5 +15,5 @@ with revit.Transaction('Set Legend Component View to {}'.format(orientation), sh
         try:
             element_param = element.get_Parameter(DB.BuiltInParameter.LEGEND_COMPONENT_VIEW)
             element_param.Set(i)
-        except:
-            pass
+        except (AttributeError, Exception):
+            pass  # Parameter might not exist or be read-only

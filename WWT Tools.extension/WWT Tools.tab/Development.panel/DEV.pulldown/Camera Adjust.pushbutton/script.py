@@ -68,7 +68,7 @@ def set_far_clip_enabled(view, enabled):
     if not param:
         try:
             param = view.get_Parameter(BuiltInParameter.VIEWER_BOUND_FAR_CLIPPING)
-        except:
+        except (AttributeError, Exception):
             param = None
     if param and not param.IsReadOnly:
         try:

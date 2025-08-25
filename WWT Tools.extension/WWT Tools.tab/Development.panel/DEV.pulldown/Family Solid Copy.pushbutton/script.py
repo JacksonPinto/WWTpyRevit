@@ -36,15 +36,25 @@ def create_directshapes_from_solids(solids):
         ds.SetShape([solid])
 
 def main():
-    solids = get_selected_solids()
-    if not solids:
-        print("No valid Solid geometry found in selection.")
-        return
-    t = Transaction(doc, "Recreate Selected Solids as DirectShape")
-    t.Start()
-    create_directshapes_from_solids(solids)
-    t.Commit()
-    print("DirectShape objects created from selected solids.")
+    try:
+        solids = get_selected_solids()
+        if not solids:
+            print("No valid Solid geometry found in selection.")
+            return
+        
+        t = Transaction(doc, "Recreate Selected Solids as DirectShape")
+        try:
+            t.Start()
+            create_directshapes_from_solids(solids)
+            t.Commit()
+            print("DirectShape objects created from selected solids.")
+        except Exception as e:
+            if t.GetStatus() == DB.TransactionStatus.Started:
+                t.RollBack()
+            print("Error during transaction: {}".format(str(e)))
+            raise
+    except Exception as e:
+        print("Error in main execution: {}".format(str(e)))
 
 if __name__ == "__main__":
     main()
