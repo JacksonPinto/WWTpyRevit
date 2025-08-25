@@ -129,10 +129,10 @@ try:
         msg += '\n\nCould not convert:\n' + '\n'.join('- ' + n for n in skipped)
     TaskDialog.Show('Units Converter', msg)
 
-except:
+except Exception as e:
     if t.GetStatus() == TransactionStatus.Started:
         t.RollBack()
     TaskDialog.Show(
         'Units Converter',
-        'An unexpected error occurred during unit conversion.'
+        'An unexpected error occurred during unit conversion: {}'.format(str(e))
     )

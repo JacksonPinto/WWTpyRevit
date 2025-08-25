@@ -30,8 +30,8 @@ selection = uidoc.Selection
 try:
     selected_ref = selection.PickObject(ObjectType.Element, "Select an element to export parameters")
     selected_element = doc.GetElement(selected_ref.ElementId)
-except:
-    forms.alert("No element selected. Exiting script.", exitscript=True)
+except Exception as e:
+    forms.alert("No element selected or selection error: {}".format(str(e)), exitscript=True)
 
 # Step 3: Retrieve 'Rack Spaces RU' parameter value from the Type Parameter
 selected_type = doc.GetElement(selected_element.GetTypeId())
@@ -42,8 +42,8 @@ if not rack_spaces_param:
 try:
     rack_spaces_count = rack_spaces_param.AsDouble()  # Handle numeric parameter correctly
     rack_spaces_count = int(rack_spaces_count)  # Convert to integer
-except:
-    forms.alert("Invalid value in 'Rack Spaces RU' parameter.", exitscript=True)
+except (ValueError, TypeError) as e:
+    forms.alert("Invalid value in 'Rack Spaces RU' parameter: {}".format(str(e)), exitscript=True)
 
 # Step 4: Get script folder path and set filename
 script_folder = os.path.dirname(__file__)

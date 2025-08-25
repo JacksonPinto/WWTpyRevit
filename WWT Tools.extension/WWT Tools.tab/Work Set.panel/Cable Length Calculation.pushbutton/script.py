@@ -294,7 +294,7 @@ try:
     script_path = os.path.abspath(__file__)
     script_dir = os.path.dirname(script_path)
     csv_path = os.path.join(script_dir, "tray_network_debug.csv")
-except:
+except (NameError, OSError) as e:
     script_dir = os.getcwd()
     csv_path = os.path.join(script_dir, "tray_network_debug.csv")
 
@@ -340,7 +340,7 @@ output_data = {
 
 try:
     json_path = os.path.join(script_dir, "topologic.JSON")
-except:
+except (NameError, OSError) as e:
     json_path = os.path.join(os.getcwd(), "topologic.JSON")
 
 with open(json_path, 'w') as f:

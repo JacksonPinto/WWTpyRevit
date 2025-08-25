@@ -54,8 +54,8 @@ if len(link_instances) > 1:
     try:
         idx = int(sel_text.split('.', 1)[0]) - 1
         chosen_link = link_instances[idx]
-    except:
-        forms.alert('Invalid selection. Exiting.', exitscript=True)
+    except (ValueError, IndexError) as e:
+        forms.alert('Invalid selection: {}. Exiting.'.format(str(e)), exitscript=True)
     links_to_scan = [chosen_link]
 else:
     links_to_scan = link_instances
