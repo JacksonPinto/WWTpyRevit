@@ -46,8 +46,8 @@ height_input = forms.ask_for_string(
 
 try:
     crop_height = float(height_input)
-except:
-    forms.alert('Invalid height. Please enter a numeric value.', exitscript=True)
+except (ValueError, TypeError) as e:
+    forms.alert('Invalid height. Please enter a numeric value: {}'.format(str(e)), exitscript=True)
 
 # Calculate width from selected ratio
 ratio_w, ratio_h = aspect_ratios[selected_ratio_label]

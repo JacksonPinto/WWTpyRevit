@@ -31,8 +31,8 @@ selection = uidoc.Selection
 try:
     selected_ref = selection.PickObject(ObjectType.Element, "Select an element to list parameters")
     selected_element = doc.GetElement(selected_ref.ElementId)
-except:
-    forms.alert("No element selected. Exiting script.", exitscript=True)
+except Exception as e:
+    forms.alert("No element selected or selection error: {}".format(str(e)), exitscript=True)
 
 # Step 3: Auto-load 'ParameterNames.csv' from script folder
 script_folder = os.path.dirname(__file__)
