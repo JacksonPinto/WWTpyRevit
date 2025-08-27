@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 # script.py (IronPython main script for pyRevit Cable Length Calculation)
-# Version: 6.9.6 (2025-08-27)
+# Version: 6.8.0 (2025-08-22)
 # Author: JacksonPinto
-# UPDATE: Matching on Category.Name instead of category ID for manual selection.
-# Now, if the user selects a category by name in the UI, picked elements are matched by Category.Name, not catid.
+# UPDATE: Optionally filter electrical elements by user-selected Scope Box. If a Scope Box is selected, only elements inside are processed; otherwise, all elements in the active view are processed.
+# UPDATE: For each electrical device, finds the closest point on any tray network line (not just a node), creates a new "insertion" point on the tray for a correct L-connection, and updates the network for export and pathfinding.
+# Uses int(str(el.Id)) for all ElementId cross-referencing.
+# Calls Python 3 with hardcoded path for calc_shortest.py subprocess.
 
 from Autodesk.Revit.DB import (
     FilteredElementCollector,
@@ -19,90 +21,12 @@ import math
 import json
 import os
 import sys
+sys.path.append(r"C:\Users\JacksonAugusto\AppData\Local\Programs\Python\Python312\Lib\site-packages")
+sys.path.append(r"C:\Users\JacksonAugusto\AppData\Local\Programs\Python\Python312\Lib")
 import subprocess
 
 doc = __revit__.ActiveUIDocument.Document
 uidoc = __revit__.ActiveUIDocument
-
-def get_electrical_categories():
-    cat_ids = [
-        BuiltInCategory.OST_ElectricalFixtures,
-        BuiltInCategory.OST_ElectricalEquipment,
-        BuiltInCategory.OST_LightingFixtures,
-        BuiltInCategory.OST_DataDevices,
-        BuiltInCategory.OST_LightingDevices,
-        BuiltInCategory.OST_CommunicationDevices,
-        BuiltInCategory.OST_FireAlarmDevices,
-        BuiltInCategory.OST_SecurityDevices,
-        BuiltInCategory.OST_NurseCallDevices,
-        BuiltInCategory.OST_TelephoneDevices
-    ]
-    cats = []
-    for cat_id in cat_ids:
-        cat = doc.Settings.Categories.get_Item(cat_id)
-        if cat:
-            cats.append((cat.Name, cat_id))
-    return cats
-
-def ask_infra_and_elements():
-    infra_options = [
-        ("Cable Trays", BuiltInCategory.OST_CableTray),
-        ("Cable Tray Fittings", BuiltInCategory.OST_CableTrayFitting),
-        ("Conduits", BuiltInCategory.OST_Conduit),
-        ("Conduit Fittings", BuiltInCategory.OST_ConduitFitting),
-    ]
-    infra_names = [name for name, _ in infra_options]
-    infra_selected = forms.SelectFromList.show(
-        infra_names, title="Select Infrastructure Types", multiselect=True
-    )
-    if not infra_selected:
-        forms.alert("No infrastructure types selected. Script cancelled.", exitscript=True)
-    infra_cats = [cat for name, cat in infra_options if name in infra_selected]
-
-    categories = get_electrical_categories()
-    if not categories:
-        forms.alert("No electrical categories found in model.", exitscript=True)
-    elec_cat_names = [cat[0] for cat in categories]
-    elec_selected = forms.SelectFromList.show(
-        elec_cat_names, title="Select Electrical Element Types", multiselect=True
-    )
-    if not elec_selected:
-        forms.alert("No electrical element types selected. Script cancelled.", exitscript=True)
-    elec_cat_ids = [cat[1] for cat in categories if cat[0] in elec_selected]
-
-    mode = forms.SelectFromList.show(
-        ["Manual Select (Pick Elements on Screen)", "Select All Elements in Active View"],
-        title="How would you like to select the electrical elements?", multiselect=False
-    )
-    if not mode:
-        forms.alert("No selection mode chosen. Script cancelled.", exitscript=True)
-    mode = "manual" if "Manual" in mode else "all"
-
-    return infra_cats, elec_cat_ids, elec_selected, mode
-
-def get_catid(el):
-    try:
-        catid = el.Category.Id.IntegerValue
-        if catid is not None:
-            return catid
-    except Exception:
-        pass
-    try:
-        catid = int(el.Category.Id)
-        if catid is not None:
-            return catid
-    except Exception:
-        pass
-    try:
-        if hasattr(el, "Id"):
-            val = el.Id
-            if hasattr(val, "IntegerValue"):
-                return val.IntegerValue
-            else:
-                return int(val)
-    except Exception:
-        pass
-    return None
 
 def isclose(a, b, abs_tol=1e-6):
     return abs(a - b) <= abs_tol
@@ -155,6 +79,26 @@ def get_fitting_edges(points):
             edges.append((points[i], points[i+1]))
     return edges
 
+def get_electrical_categories():
+    cat_ids = [
+        BuiltInCategory.OST_ElectricalFixtures,
+        BuiltInCategory.OST_ElectricalEquipment,
+        BuiltInCategory.OST_LightingFixtures,
+        BuiltInCategory.OST_DataDevices,
+        BuiltInCategory.OST_LightingDevices,
+        BuiltInCategory.OST_CommunicationDevices,
+        BuiltInCategory.OST_FireAlarmDevices,
+        BuiltInCategory.OST_SecurityDevices,
+        BuiltInCategory.OST_NurseCallDevices,
+        BuiltInCategory.OST_TelephoneDevices
+    ]
+    cats = []
+    for cat_id in cat_ids:
+        cat = doc.Settings.Categories.get_Item(cat_id)
+        if cat:
+            cats.append((cat.Name, cat_id))
+    return cats
+
 def get_face_center(face):
     bbox = face.GetBoundingBox()
     min_uv = bbox.Min
@@ -167,6 +111,9 @@ def distance3d(a, b):
     return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
 
 def closest_point_on_line(pt, line):
+    """Given pt=(x,y,z), line=((x1,y1,z1),(x2,y2,z2)), return (closest_pt, dist, t)
+    t in [0,1]: on the segment. t<0 or t>1: projection off segment, use endpoint.
+    """
     ax, ay, az = line[0]
     bx, by, bz = line[1]
     px, py, pz = pt
@@ -181,34 +128,22 @@ def closest_point_on_line(pt, line):
     dist = distance3d(pt, closest)
     return (closest, dist, t_clamped)
 
-# --- STEP 0: Initial UI ---
-infra_cats, elec_cat_ids, elec_selected_names, select_mode = ask_infra_and_elements()
-
 # ---------------- STEP 1: Ask Equipment Color
 color_filter = forms.ask_for_string(
-    prompt="Enter Equipment Color value to filter Cable Trays, Fittings, Conduits, and Conduit Fittings:",
+    prompt="Enter Equipment Color value to filter Cable Trays and Fittings:",
     default="",
     title="Filter by Equipment Color"
 )
 if not color_filter:
     forms.alert("No Equipment Color value entered. Script cancelled.", exitscript=True)
 
-# ---------------- STEP 2: Collect infrastructure elements
-infra_elements = []
-for cat in infra_cats:
-    collector = FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(cat).WhereElementIsNotElementType()
-    filtered = [elem for elem in collector if get_param_value(elem, "Equipment Color") and get_param_value(elem, "Equipment Color").strip().lower() == color_filter.strip().lower()]
-    infra_elements.extend(filtered)
+# Collect trays and fittings
+collector_trays = FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(BuiltInCategory.OST_CableTray).WhereElementIsNotElementType()
+collector_fittings = FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(BuiltInCategory.OST_CableTrayFitting).WhereElementIsNotElementType()
+trays = [elem for elem in collector_trays if get_param_value(elem, "Equipment Color") and get_param_value(elem, "Equipment Color").strip().lower() == color_filter.strip().lower()]
+fittings = [elem for elem in collector_fittings if get_param_value(elem, "Equipment Color") and get_param_value(elem, "Equipment Color").strip().lower() == color_filter.strip().lower()]
 
-trays = [el for el in infra_elements if get_catid(el) == int(BuiltInCategory.OST_CableTray)]
-tray_fittings = [el for el in infra_elements if get_catid(el) == int(BuiltInCategory.OST_CableTrayFitting)]
-conduits = [el for el in infra_elements if get_catid(el) == int(BuiltInCategory.OST_Conduit)]
-conduit_fittings = [el for el in infra_elements if get_catid(el) == int(BuiltInCategory.OST_ConduitFitting)]
-
-# For tray/fitting network, use only trays and tray fittings (legacy logic)
-all_network_elements = trays + tray_fittings
-
-# ---------------- STEP 3: Build tray/fitting network (edges)
+# ---------------- STEP 2: Build tray/fitting network (edges)
 network_edges = []
 tray_lines = []
 tray_points = []  # for legacy fallback, not used in new logic
@@ -221,7 +156,7 @@ for tray in trays:
         tray_points.append(cl[0])
         tray_points.append(cl[1])
 
-for fitting in tray_fittings:
+for fitting in fittings:
     pts = get_fitting_connectors(fitting)
     if len(pts) >= 2:
         edges = get_fitting_edges(pts)
@@ -231,71 +166,24 @@ for fitting in tray_fittings:
             tray_points.append(edge[0])
             tray_points.append(edge[1])
 
-# --- For diagnostics: show BuiltInCategory int for user's selected categories
-def get_bic_val(catname):
-    mapping = {
-        "Electrical Fixtures": BuiltInCategory.OST_ElectricalFixtures,
-        "Electrical Equipment": BuiltInCategory.OST_ElectricalEquipment,
-        "Lighting Fixtures": BuiltInCategory.OST_LightingFixtures,
-        "Data Devices": BuiltInCategory.OST_DataDevices,
-        "Lighting Devices": BuiltInCategory.OST_LightingDevices,
-        "Communication Devices": BuiltInCategory.OST_CommunicationDevices,
-        "Fire Alarm Devices": BuiltInCategory.OST_FireAlarmDevices,
-        "Security Devices": BuiltInCategory.OST_SecurityDevices,
-        "Nurse Call Devices": BuiltInCategory.OST_NurseCallDevices,
-        "Telephone Devices": BuiltInCategory.OST_TelephoneDevices
-    }
-    if catname in mapping:
-        return int(mapping[catname])
-    else:
-        return None
+# ---------------- STEP 3: User selects electrical element category, connect all elements to network
+categories = get_electrical_categories()
+if not categories:
+    forms.alert("No electrical categories found in model.", exitscript=True)
 
-# ---------------- STEP 4: Collect electrical elements (Manual or All in View)
-elements = []
-if select_mode == "manual":
-    try:
-        refs = uidoc.Selection.PickObjects(ObjectType.Element, "Select electrical elements from any of the categories you selected in the previous step")
-        picked = [doc.GetElement(r.ElementId) for r in refs]
-        valid_cat_names = set([str(name) for name in elec_selected_names])
-        elements = [el for el in picked if el.Category and el.Category.Name in valid_cat_names]
-        if not elements:
-            picked_info = []
-            for el in picked:
-                try:
-                    picked_info.append(
-                        "Element ID: {}, Name: {}, Category: {}".format(
-                            el.Id, el.Name if hasattr(el, "Name") else "N/A",
-                            el.Category.Name if el.Category else "None"
-                        )
-                    )
-                except Exception as ex:
-                    picked_info.append("Element ID: {}, Error: {}".format(el.Id, ex))
-            selected_cat_lines = []
-            for catname in elec_selected_names:
-                bic_val = get_bic_val(catname)
-                selected_cat_lines.append("{} (BuiltInCategory int: {})".format(catname, bic_val))
-            forms.alert(
-                "No picked elements match your selected electrical categories (by category name).\n\n"
-                "You selected these elements:\n{}\n\n"
-                "Your selected categories (by name):\n{}\n"
-                "Check if your picked elements belong to the chosen categories."
-                .format('\n'.join(picked_info), '\n'.join(selected_cat_lines)),
-                exitscript=True
-            )
-    except Exception:
-        forms.alert("No elements selected. Script cancelled.", exitscript=True)
-else:
-    for catid in elec_cat_ids:
-        elements.extend(
-            FilteredElementCollector(doc, doc.ActiveView.Id)
-            .OfCategory(catid)
-            .WhereElementIsNotElementType()
-            .ToElements()
-        )
-elements = [el for el in elements if hasattr(el, "Location") and hasattr(el.Location, "Point") and el.Location.Point is not None]
+cat_names = [cat[0] for cat in categories]
+selected_name = forms.SelectFromList.show(cat_names, title="Select Electrical Element Category", multiselect=False)
+if not selected_name:
+    forms.alert("No category selected. Script cancelled.", exitscript=True)
+if isinstance(selected_name, list):
+    selected_name = selected_name[0]
+selected_cat_id = [cat[1] for cat in categories if cat[0] == selected_name][0]
+
+collector_elements = FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(selected_cat_id).WhereElementIsNotElementType()
+elements = [el for el in collector_elements if el.Location and hasattr(el.Location, "Point")]
 
 if not elements:
-    forms.alert("No electrical elements found per your selection in the active view.", exitscript=True)
+    forms.alert("No elements of selected category visible in active view.", exitscript=True)
 
 # ---------------- OPTIONAL SCOPE BOX FILTER ----------------
 scopebox_elem = None
@@ -304,7 +192,9 @@ try:
     if pick == "Select":
         scopebox_ref = uidoc.Selection.PickObject(ObjectType.Element, "Select a Scope Box (or Cancel for all elements in view)")
         scopebox_elem = doc.GetElement(scopebox_ref.ElementId)
-        if get_catid(scopebox_elem) != int(BuiltInCategory.OST_VolumeOfInterest):
+        # Ensure Scope Box category
+        from Autodesk.Revit.DB import BuiltInCategory
+        if scopebox_elem.Category.Id.IntegerValue != int(BuiltInCategory.OST_VolumeOfInterest):
             forms.alert("Selected element is not a Scope Box. Ignoring selection.")
             scopebox_elem = None
 except Exception:
@@ -325,9 +215,9 @@ if scopebox_elem:
                 pass
         elements = elements_in_scope
         if not elements:
-            forms.alert("No elements of selected types inside chosen Scope Box.", exitscript=True)
+            forms.alert("No elements of selected category inside chosen Scope Box.", exitscript=True)
 
-# ---------------- STEP 5: User selects tray/fitting FACE in any view, script gets face center
+# ---------------- STEP 4: User selects tray/fitting FACE in any view, script gets face center
 forms.alert("Select a FACE on a cable tray or fitting (in any view).\nThe face center will be used as the route destination for all devices.")
 try:
     picked_ref = uidoc.Selection.PickObject(ObjectType.Face, "Select a FACE on a cable tray or fitting")
@@ -341,7 +231,7 @@ if not hasattr(geom_obj, "Evaluate"):
 
 end_xyz = get_face_center(geom_obj)
 
-# ----------- STEP 6: For each device, connect to tray network by closest point on any tray segment -----------
+# ----------- STEP 5: For each device, connect to tray network by closest point on any tray segment -----------
 def pt_str(pt):
     return "({:.3f}, {:.3f}, {:.3f})".format(pt[0], pt[1], pt[2])
 
@@ -361,7 +251,7 @@ for idx, el in enumerate(elements):
 
     # Find the closest point on ANY tray/fitting segment (not just node)
     min_dist = None
-    min_data = None
+    min_data = None # tuple: (closest_xyz_on_line, tray_line, t)
     for line in tray_lines:
         closest, d, t = closest_point_on_line(el_xyz, line)
         if (min_dist is None) or (d < min_dist):
@@ -395,6 +285,7 @@ for idx, el in enumerate(elements):
         connections.append((drop_pt, closest_on_tray))
         csv_lines.append((el_id, "jumper", drop_pt, closest_on_tray, jumper_dist))
 
+# Add tray/fitting network edges to CSV too for visualization
 for idx, seg in enumerate(network_edges):
     csv_lines.append(("TRAY", "tray_edge", seg[0], seg[1], distance3d(seg[0], seg[1])))
 
@@ -428,9 +319,11 @@ edges = []
 for line in all_lines:
     pt1 = tuple(line[0])
     pt2 = tuple(line[1])
+    # Map pt1
     if pt1 not in vertex_map:
         vertex_map[pt1] = len(vertices)
         vertices.append(list(pt1))
+    # Map pt2
     if pt2 not in vertex_map:
         vertex_map[pt2] = len(vertices)
         vertices.append(list(pt2))
