@@ -1,26 +1,35 @@
 # -*- coding: utf-8 -*-
 # update_cable_lengths.py
-# Version: 6.5.1 (2025-08-22)
+# Version: 6.5.2 (2025-08-27)
 # Author: JacksonPinto
-# IronPython/pyRevit version, updating Revit elements from Topologic results.
-# Uses int(str(el.Id)) for cross-referencing element IDs.
 #
-# IMPROVEMENT: Also sets parameter "Equipment Color" to "Green" if 'length' exists, "Red" if not.
-
+# UPDATE 6.5.2:
+# - Adjusted reader for new results JSON structure (results list under 'results', includes meta).
+# - Verifies count of elements found vs results.
+# - Logs skipped elements (no path).
+# - Keeps existing behavior coloring Green (has length) / Red (no length).
+#
 from Autodesk.Revit.DB import FilteredElementCollector, Transaction
 from pyrevit import forms
-import json
-import os
+import json, os
 
 doc = __revit__.ActiveUIDocument.Document
-
 script_dir = os.path.dirname(__file__)
 results_path = os.path.join(script_dir, "topologic_results.json")
 
-with open(results_path, "r") as f:
-    results = json.load(f)
+if not os.path.exists(results_path):
+    forms.alert("Results file not found: {}".format(results_path), exitscript=True)
 
-# ----------------- Ask user for target element category and parameter
+with open(results_path, "r") as f:
+    data = json.load(f)
+
+# Backward compatibility: if 'results' not present assume full list
+if "results" in data:
+    results = data["results"]
+else:
+    results = data  # old format list
+
+# Collect categories in active view
 categories = set()
 for el in FilteredElementCollector(doc, doc.ActiveView.Id).WhereElementIsNotElementType():
     try:
@@ -28,76 +37,84 @@ for el in FilteredElementCollector(doc, doc.ActiveView.Id).WhereElementIsNotElem
             categories.add(el.Category.Name)
     except:
         pass
+
 categories = sorted(categories)
-selected_cat = forms.SelectFromList.show(categories, title="Select Category to Update", multiselect=False)
+selected_cat = forms.SelectFromList.show(categories, title="Select Category to Update (Cable Length)", multiselect=False)
 if not selected_cat:
-    forms.alert("No category selected. Script cancelled.", exitscript=True)
+    forms.alert("No category selected. Cancelled.", exitscript=True)
 if isinstance(selected_cat, list):
     selected_cat = selected_cat[0]
 
-collector = FilteredElementCollector(doc, doc.ActiveView.Id).WhereElementIsNotElementType()
-elements = [el for el in collector if el.Category and el.Category.Name == selected_cat]
-
+elements = [
+    el for el in FilteredElementCollector(doc, doc.ActiveView.Id).WhereElementIsNotElementType()
+    if el.Category and el.Category.Name == selected_cat
+]
 if not elements:
-    forms.alert("No elements of selected category visible in active view.", exitscript=True)
+    forms.alert("No elements of selected category in view.", exitscript=True)
 
-# Get all parameters from first element for user to pick target
+# Parameter selection
 param_names = [p.Definition.Name for p in elements[0].Parameters]
-target_param = forms.SelectFromList.show(param_names, title="Select Parameter to Store Cable Length", multiselect=False)
+target_param = forms.SelectFromList.show(param_names, title="Select Parameter to store cable length", multiselect=False)
 if not target_param:
-    forms.alert("No parameter selected. Script cancelled.", exitscript=True)
+    forms.alert("No target parameter chosen.", exitscript=True)
 
-# Ask user for the "Equipment Color" parameter (can be fixed if always same)
 color_param = "Equipment Color"
 if color_param not in param_names:
-    # Offer to select a color parameter if not found
-    color_param_opts = [n for n in param_names if "Color" in n or "colour" in n] or param_names
-    color_param = forms.SelectFromList.show(color_param_opts, title="Select Color Parameter (for Green/Red)", multiselect=False)
-    if not color_param:
-        forms.alert("No color parameter selected. Script cancelled.", exitscript=True)
+    candidate = [n for n in param_names if "Color" in n or "colour" in n]
+    if not candidate:
+        candidate = param_names
+    picked = forms.SelectFromList.show(candidate, title="Select Color Parameter (Green/Red)", multiselect=False)
+    if not picked:
+        forms.alert("No color parameter chosen.", exitscript=True)
+    color_param = picked if not isinstance(picked, list) else picked[0]
 
-# ----------------- Update parameters
+# Map elements
 id_to_elem = {}
 for el in elements:
-    el_id = int(str(el.Id))  # Use int(str(el.Id)) for IronPython compatibility!
-    id_to_elem[el_id] = el
+    try:
+        id_to_elem[int(str(el.Id))] = el
+    except:
+        pass
 
-updated_count = 0
-color_green_count = 0
-color_red_count = 0
+# Apply
+updated = 0
+green = 0
+red = 0
+skipped_missing = 0
 
-t = Transaction(doc, "Update Cable Lengths & Equipment Color")
+t = Transaction(doc, "Update Cable Lengths")
 t.Start()
 for res in results:
-    el_id = res["element_id"]
+    eid = res.get("element_id")
     length = res.get("length")
-    el = id_to_elem.get(el_id)
+    el = id_to_elem.get(eid)
     if not el:
+        skipped_missing += 1
         continue
-
-    # Set cable length if possible
-    param = el.LookupParameter(target_param)
-    if param and length is not None:
+    # set length
+    if length is not None:
+        p = el.LookupParameter(target_param)
+        if p:
+            try:
+                p.Set(length)  # values are in internal feet
+                updated += 1
+            except Exception as e:
+                print("[WARN] Could not set length for {}: {}".format(eid, e))
+    # set color
+    cp = el.LookupParameter(color_param)
+    if cp:
         try:
-            param.Set(length)
-            updated_count += 1
-        except Exception as e:
-            print("[WARN] Could not set length for element {}: {}".format(el_id, e))
-
-    # Set Equipment Color
-    color = "Green" if length is not None else "Red"
-    color_p = el.LookupParameter(color_param)
-    if color_p:
-        try:
-            color_p.Set(color)
-            if color == "Green":
-                color_green_count += 1
+            if length is not None:
+                cp.Set("Green")
+                green += 1
             else:
-                color_red_count += 1
+                cp.Set("Red")
+                red += 1
         except Exception as e:
-            print("[WARN] Could not set color for element {}: {}".format(el_id, e))
+            print("[WARN] Could not set color for {}: {}".format(eid, e))
 t.Commit()
 
-forms.alert("Cable length updated for {} elements in '{}'.\nEquipment Color set: Green={} | Red={}\nDone.".format(
-    updated_count, target_param, color_green_count, color_red_count
-))
+forms.alert(
+    "Update complete.\nCategory: {}\nLength Param: {}\nUpdated Lengths: {}\nGreen: {}  Red: {}\nSkipped (no element in view): {}\nTotal Results: {}"
+    .format(selected_cat, target_param, updated, green, red, skipped_missing, len(results))
+)

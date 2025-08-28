@@ -1,31 +1,156 @@
 # -*- coding: utf-8 -*-
-# script.py (IronPython main script for pyRevit Cable Length Calculation)
-# Version: 6.9.6 (2025-08-27)
+# run_script.py  (ALT experimental run-based implementation)
+# Version: 0.1.0 (2025-08-27)
 # Author: JacksonPinto
-# UPDATE: Matching on Category.Name instead of category ID for manual selection.
-# Now, if the user selects a category by name in the UI, picked elements are matched by Category.Name, not catid.
+#
+# PURPOSE:
+#   Alternative test script that builds infrastructure network primarily from
+#   CableTrayRun / ConduitRun (CableTrayConduitRunBase descendants) instead of
+#   stitching every tray + fitting manually. Falls back to legacy element-by-element
+#   extraction for:
+#       - Residual trays / conduits not part of any accepted run
+#       - Fittings (tray or conduit) if user chooses to include residual elements
+#
+# WORKFLOW (similar to main script):
+#   1. User selects infrastructure categories (still offer trays/fittings/conduits/fittings).
+#   2. Script gathers run objects (CableTrayRun, ConduitRun) if those categories imply tray/conduit use.
+#   3. For each run:
+#        * Collect its member element Ids (reflection for MemberIds / GetMemberIds).
+#        * Test Equipment Color filter against member elements (ANY match = run accepted).
+#        * Extract ordered path curves (reflection for GetCurves / GetPath*).
+#        * Sample curves (lines pass through directly; arcs & non-lines subdivided).
+#        * Add edges between successive sample points.
+#   4. Optionally include residual individual infrastructure elements (centerlines + fitting connectors).
+#   5. Create L-shaped jumper connections from each electrical device to nearest network segment.
+#   6. Export graph as topologic.JSON (meta included) & debug CSV.
+#   7. Invoke calc_shortest.py (Python 3) then update_cable_lengths.py.
+#
+# NOTES / LIMITATIONS:
+#   - Because Revit 2025 API method names can evolve, reflection attempts multiple
+#     method/property names for run path and member IDs.
+#   - If *no runs* found or *no runs pass filter*, fallback network may rely entirely
+#     on residual extraction (if enabled) otherwise direct (star) mode.
+#   - Arcs: Sampled with chord length max ARC_SEG_LEN_FT to preserve routed length.
+#   - Units: All coordinates & lengths are Revit internal feet (consistent with other scripts).
+#
+# COMPATIBILITY:
+#   - calc_shortest.py and update_cable_lengths.py previously supplied remain compatible.
+#
+# ------------------------------------------------------------------------------
 
 from Autodesk.Revit.DB import (
     FilteredElementCollector,
     BuiltInCategory,
-    Face,
     UV,
-    Line as RevitLine,
     XYZ
 )
 from Autodesk.Revit.UI.Selection import ObjectType
 from pyrevit import forms
-import math
-import json
-import os
-import sys
-import subprocess
+import math, json, os, subprocess, traceback
 
 doc = __revit__.ActiveUIDocument.Document
 uidoc = __revit__.ActiveUIDocument
 
+# ------------------------------ CONFIG ---------------------------------
+ARC_SEG_LEN_FT = 2.0      # Max chord length when discretizing arcs / splines (feet)
+MERGE_TOL = 1e-5          # Vertex merge tolerance (feet)
+# -----------------------------------------------------------------------
+
+# --------------------------- BASIC UTILITIES ---------------------------
+def get_catid(el):
+    try:
+        return el.Category.Id.IntegerValue
+    except:
+        try:
+            return int(el.Category.Id)
+        except:
+            return None
+
+def get_param_value(el, pname):
+    p = el.LookupParameter(pname)
+    if p:
+        try:
+            return p.AsString()
+        except:
+            return None
+    return None
+
+def distance3d(a,b):
+    return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
+
+def isclose(a,b,t=1e-9):
+    return abs(a-b)<=t
+
+def closest_point_on_line(pt, seg):
+    ax,ay,az = seg[0]; bx,by,bz=seg[1]; px,py,pz=pt
+    ab=(bx-ax,by-ay,bz-az); ap=(px-ax,py-ay,pz-az)
+    ab2=ab[0]**2+ab[1]**2+ab[2]**2
+    if ab2==0:
+        return (seg[0], distance3d(pt, seg[0]), 0.0)
+    t=(ap[0]*ab[0]+ap[1]*ab[1]+ap[2]*ab[2])/ab2
+    t=max(0.0,min(1.0,t))
+    cx=ax+ab[0]*t; cy=ay+ab[1]*t; cz=az+ab[2]*t
+    cpt=(cx,cy,cz)
+    return (cpt, distance3d(pt,cpt), t)
+
+def conduit_or_tray_centerline(el):
+    try:
+        loc=el.Location
+        if hasattr(loc,"Curve") and loc.Curve:
+            c=loc.Curve
+            sp=c.GetEndPoint(0); ep=c.GetEndPoint(1)
+            return [(sp.X,sp.Y,sp.Z),(ep.X,ep.Y,ep.Z)]
+    except: pass
+    return None
+
+def fitting_connectors(el):
+    pts=[]
+    try:
+        mep=getattr(el,'MEPModel',None)
+        if mep:
+            cm=getattr(mep,'ConnectorManager',None)
+            if cm and cm.Connectors:
+                for conn in cm.Connectors:
+                    o=conn.Origin
+                    pts.append((o.X,o.Y,o.Z))
+    except: pass
+    try:
+        cm2=getattr(el,'ConnectorManager',None)
+        if cm2 and cm2.Connectors:
+            for conn in cm2.Connectors:
+                o=conn.Origin
+                p=(o.X,o.Y,o.Z)
+                if p not in pts:
+                    pts.append(p)
+    except: pass
+    return pts
+
+def fitting_edges_from_connectors(points):
+    edges=[]
+    n=len(points)
+    if n==2:
+        edges.append((points[0],points[1]))
+    elif n==3:
+        edges += [(points[0],points[1]),(points[1],points[2]),(points[2],points[0])]
+    elif n==4:
+        edges += [(points[0],points[2]),(points[1],points[3])]
+    else:
+        for i in range(n-1):
+            edges.append((points[i],points[i+1]))
+    return edges
+
+def face_center_from_reference(ref):
+    el=doc.GetElement(ref.ElementId)
+    geom=el.GetGeometryObjectFromReference(ref)
+    if not hasattr(geom, "Evaluate"):
+        return None, el
+    bbox=geom.GetBoundingBox()
+    cuv=UV((bbox.Min.U+bbox.Max.U)/2.0, (bbox.Min.V+bbox.Max.V)/2.0)
+    xyz=geom.Evaluate(cuv)
+    return (xyz.X,xyz.Y,xyz.Z), el
+
 def get_electrical_categories():
-    cat_ids = [
+    ids=[
         BuiltInCategory.OST_ElectricalFixtures,
         BuiltInCategory.OST_ElectricalEquipment,
         BuiltInCategory.OST_LightingFixtures,
@@ -37,443 +162,493 @@ def get_electrical_categories():
         BuiltInCategory.OST_NurseCallDevices,
         BuiltInCategory.OST_TelephoneDevices
     ]
-    cats = []
-    for cat_id in cat_ids:
-        cat = doc.Settings.Categories.get_Item(cat_id)
-        if cat:
-            cats.append((cat.Name, cat_id))
-    return cats
+    out=[]
+    for cid in ids:
+        cat=doc.Settings.Categories.get_Item(cid)
+        if cat: out.append((cat.Name,cid))
+    return out
 
-def ask_infra_and_elements():
-    infra_options = [
+# --------------------- USER INPUT ---------------------
+def ask_initial():
+    infra_opts=[
         ("Cable Trays", BuiltInCategory.OST_CableTray),
         ("Cable Tray Fittings", BuiltInCategory.OST_CableTrayFitting),
         ("Conduits", BuiltInCategory.OST_Conduit),
         ("Conduit Fittings", BuiltInCategory.OST_ConduitFitting),
     ]
-    infra_names = [name for name, _ in infra_options]
-    infra_selected = forms.SelectFromList.show(
-        infra_names, title="Select Infrastructure Types", multiselect=True
-    )
-    if not infra_selected:
-        forms.alert("No infrastructure types selected. Script cancelled.", exitscript=True)
-    infra_cats = [cat for name, cat in infra_options if name in infra_selected]
+    names=[n for n,_ in infra_opts]
+    infra_sel=forms.SelectFromList.show(names, title="Select Infrastructure Categories", multiselect=True)
+    if not infra_sel: forms.alert("No infrastructure categories selected.", exitscript=True)
+    infra_cats=[cid for n,cid in infra_opts if n in infra_sel]
 
-    categories = get_electrical_categories()
-    if not categories:
-        forms.alert("No electrical categories found in model.", exitscript=True)
-    elec_cat_names = [cat[0] for cat in categories]
-    elec_selected = forms.SelectFromList.show(
-        elec_cat_names, title="Select Electrical Element Types", multiselect=True
-    )
-    if not elec_selected:
-        forms.alert("No electrical element types selected. Script cancelled.", exitscript=True)
-    elec_cat_ids = [cat[1] for cat in categories if cat[0] in elec_selected]
+    ecs=get_electrical_categories()
+    if not ecs: forms.alert("No electrical categories found.", exitscript=True)
+    enames=[n for n,_ in ecs]
+    elec_sel=forms.SelectFromList.show(enames, title="Select Electrical Device Categories", multiselect=True)
+    if not elec_sel: forms.alert("No electrical categories selected.", exitscript=True)
+    elec_ids=[cid for n,cid in ecs if n in elec_sel]
 
-    mode = forms.SelectFromList.show(
-        ["Manual Select (Pick Elements on Screen)", "Select All Elements in Active View"],
-        title="How would you like to select the electrical elements?", multiselect=False
-    )
-    if not mode:
-        forms.alert("No selection mode chosen. Script cancelled.", exitscript=True)
+    mode=forms.SelectFromList.show(["Manual Select (Pick Devices)","All Devices in Active View"],
+                                   multiselect=False,
+                                   title="Electrical Element Selection Mode")
+    if not mode: forms.alert("No mode selected.", exitscript=True)
     mode = "manual" if "Manual" in mode else "all"
 
-    return infra_cats, elec_cat_ids, elec_selected, mode
+    include_residual=forms.alert(
+        "Include RESIDUAL individual elements (centerlines + fitting connectors)\nNOT part of accepted runs?",
+        options=["Yes","No"])
+    residual = (include_residual=="Yes")
 
-def get_catid(el):
-    try:
-        catid = el.Category.Id.IntegerValue
-        if catid is not None:
-            return catid
-    except Exception:
-        pass
-    try:
-        catid = int(el.Category.Id)
-        if catid is not None:
-            return catid
-    except Exception:
-        pass
-    try:
-        if hasattr(el, "Id"):
-            val = el.Id
-            if hasattr(val, "IntegerValue"):
-                return val.IntegerValue
-            else:
-                return int(val)
-    except Exception:
-        pass
-    return None
+    return infra_cats, elec_ids, elec_sel, mode, residual
 
-def isclose(a, b, abs_tol=1e-6):
-    return abs(a - b) <= abs_tol
+infra_cats, elec_cat_ids, elec_selected_names, select_mode, include_residual = ask_initial()
 
-def get_param_value(elem, param_name):
-    param = elem.LookupParameter(param_name)
-    if param:
-        return param.AsString()
-    return None
-
-def get_tray_centerline(tray):
-    try:
-        lc = tray.Location
-        if hasattr(lc, "Curve") and lc.Curve:
-            curve = lc.Curve
-            sp = curve.GetEndPoint(0)
-            ep = curve.GetEndPoint(1)
-            return [(sp.X, sp.Y, sp.Z), (ep.X, ep.Y, ep.Z)]
-    except Exception:
-        pass
-    return None
-
-def get_fitting_connectors(fitting):
-    points = []
-    try:
-        cm = None
-        if hasattr(fitting, 'MEPModel') and fitting.MEPModel:
-            cm = fitting.MEPModel.ConnectorManager
-        elif hasattr(fitting, 'ConnectorManager'):
-            cm = fitting.ConnectorManager
-        if cm:
-            for conn in cm.Connectors:
-                org = conn.Origin
-                points.append((org.X, org.Y, org.Z))
-    except Exception:
-        pass
-    return points
-
-def get_fitting_edges(points):
-    edges = []
-    n = len(points)
-    if n == 2:
-        edges.append((points[0], points[1]))
-    elif n == 3:
-        edges.extend([(points[0], points[1]), (points[1], points[2]), (points[2], points[0])])
-    elif n == 4:
-        edges.extend([(points[0], points[2]), (points[1], points[3])])
-    else:
-        for i in range(n-1):
-            edges.append((points[i], points[i+1]))
-    return edges
-
-def get_face_center(face):
-    bbox = face.GetBoundingBox()
-    min_uv = bbox.Min
-    max_uv = bbox.Max
-    center_uv = UV((min_uv.U + max_uv.U) * 0.5, (min_uv.V + max_uv.V) * 0.5)
-    center_xyz = face.Evaluate(center_uv)
-    return (center_xyz.X, center_xyz.Y, center_xyz.Z)
-
-def distance3d(a, b):
-    return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
-
-def closest_point_on_line(pt, line):
-    ax, ay, az = line[0]
-    bx, by, bz = line[1]
-    px, py, pz = pt
-    ab = (bx - ax, by - ay, bz - az)
-    ap = (px - ax, py - ay, pz - az)
-    ab_len2 = ab[0]**2 + ab[1]**2 + ab[2]**2
-    if ab_len2 == 0:
-        return (line[0], distance3d(pt, line[0]), 0.0)
-    t = (ap[0]*ab[0] + ap[1]*ab[1] + ap[2]*ab[2]) / ab_len2
-    t_clamped = max(0.0, min(1.0, t))
-    closest = (ax + ab[0]*t_clamped, ay + ab[1]*t_clamped, az + ab[2]*t_clamped)
-    dist = distance3d(pt, closest)
-    return (closest, dist, t_clamped)
-
-# --- STEP 0: Initial UI ---
-infra_cats, elec_cat_ids, elec_selected_names, select_mode = ask_infra_and_elements()
-
-# ---------------- STEP 1: Ask Equipment Color
-color_filter = forms.ask_for_string(
-    prompt="Enter Equipment Color value to filter Cable Trays, Fittings, Conduits, and Conduit Fittings:",
-    default="",
-    title="Filter by Equipment Color"
+color_filter=forms.ask_for_string(
+    prompt="Equipment Color filter (blank=skip). Run accepted if ANY member element matches.",
+    default="Blue",
+    title="Color Filter"
 )
-if not color_filter:
-    forms.alert("No Equipment Color value entered. Script cancelled.", exitscript=True)
+if color_filter is None:
+    forms.alert("Cancelled.", exitscript=True)
+color_filter_norm=color_filter.strip().lower()
+use_color = (color_filter_norm!="")
 
-# ---------------- STEP 2: Collect infrastructure elements
-infra_elements = []
-for cat in infra_cats:
-    collector = FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(cat).WhereElementIsNotElementType()
-    filtered = [elem for elem in collector if get_param_value(elem, "Equipment Color") and get_param_value(elem, "Equipment Color").strip().lower() == color_filter.strip().lower()]
-    infra_elements.extend(filtered)
-
-trays = [el for el in infra_elements if get_catid(el) == int(BuiltInCategory.OST_CableTray)]
-tray_fittings = [el for el in infra_elements if get_catid(el) == int(BuiltInCategory.OST_CableTrayFitting)]
-conduits = [el for el in infra_elements if get_catid(el) == int(BuiltInCategory.OST_Conduit)]
-conduit_fittings = [el for el in infra_elements if get_catid(el) == int(BuiltInCategory.OST_ConduitFitting)]
-
-# For tray/fitting network, use only trays and tray fittings (legacy logic)
-all_network_elements = trays + tray_fittings
-
-# ---------------- STEP 3: Build tray/fitting network (edges)
-network_edges = []
-tray_lines = []
-tray_points = []  # for legacy fallback, not used in new logic
-
-for tray in trays:
-    cl = get_tray_centerline(tray)
-    if cl:
-        network_edges.append(tuple(cl))
-        tray_lines.append((cl[0], cl[1]))
-        tray_points.append(cl[0])
-        tray_points.append(cl[1])
-
-for fitting in tray_fittings:
-    pts = get_fitting_connectors(fitting)
-    if len(pts) >= 2:
-        edges = get_fitting_edges(pts)
-        for edge in edges:
-            network_edges.append(edge)
-            tray_lines.append(edge)
-            tray_points.append(edge[0])
-            tray_points.append(edge[1])
-
-# --- For diagnostics: show BuiltInCategory int for user's selected categories
-def get_bic_val(catname):
-    mapping = {
-        "Electrical Fixtures": BuiltInCategory.OST_ElectricalFixtures,
-        "Electrical Equipment": BuiltInCategory.OST_ElectricalEquipment,
-        "Lighting Fixtures": BuiltInCategory.OST_LightingFixtures,
-        "Data Devices": BuiltInCategory.OST_DataDevices,
-        "Lighting Devices": BuiltInCategory.OST_LightingDevices,
-        "Communication Devices": BuiltInCategory.OST_CommunicationDevices,
-        "Fire Alarm Devices": BuiltInCategory.OST_FireAlarmDevices,
-        "Security Devices": BuiltInCategory.OST_SecurityDevices,
-        "Nurse Call Devices": BuiltInCategory.OST_NurseCallDevices,
-        "Telephone Devices": BuiltInCategory.OST_TelephoneDevices
-    }
-    if catname in mapping:
-        return int(mapping[catname])
-    else:
-        return None
-
-# ---------------- STEP 4: Collect electrical elements (Manual or All in View)
-elements = []
-if select_mode == "manual":
-    try:
-        refs = uidoc.Selection.PickObjects(ObjectType.Element, "Select electrical elements from any of the categories you selected in the previous step")
-        picked = [doc.GetElement(r.ElementId) for r in refs]
-        valid_cat_names = set([str(name) for name in elec_selected_names])
-        elements = [el for el in picked if el.Category and el.Category.Name in valid_cat_names]
-        if not elements:
-            picked_info = []
-            for el in picked:
-                try:
-                    picked_info.append(
-                        "Element ID: {}, Name: {}, Category: {}".format(
-                            el.Id, el.Name if hasattr(el, "Name") else "N/A",
-                            el.Category.Name if el.Category else "None"
-                        )
-                    )
-                except Exception as ex:
-                    picked_info.append("Element ID: {}, Error: {}".format(el.Id, ex))
-            selected_cat_lines = []
-            for catname in elec_selected_names:
-                bic_val = get_bic_val(catname)
-                selected_cat_lines.append("{} (BuiltInCategory int: {})".format(catname, bic_val))
-            forms.alert(
-                "No picked elements match your selected electrical categories (by category name).\n\n"
-                "You selected these elements:\n{}\n\n"
-                "Your selected categories (by name):\n{}\n"
-                "Check if your picked elements belong to the chosen categories."
-                .format('\n'.join(picked_info), '\n'.join(selected_cat_lines)),
-                exitscript=True
-            )
-    except Exception:
-        forms.alert("No elements selected. Script cancelled.", exitscript=True)
-else:
-    for catid in elec_cat_ids:
-        elements.extend(
-            FilteredElementCollector(doc, doc.ActiveView.Id)
-            .OfCategory(catid)
-            .WhereElementIsNotElementType()
-            .ToElements()
-        )
-elements = [el for el in elements if hasattr(el, "Location") and hasattr(el.Location, "Point") and el.Location.Point is not None]
-
-if not elements:
-    forms.alert("No electrical elements found per your selection in the active view.", exitscript=True)
-
-# ---------------- OPTIONAL SCOPE BOX FILTER ----------------
-scopebox_elem = None
+# -------------------- RUN COLLECTION --------------------
+# We attempt to import run classes; if not present (old Revit) we gracefully fallback.
 try:
-    pick = forms.alert("Optionally select a Scope Box. Click OK to select or Cancel to use all elements in the active view.", options=["Select", "Cancel"])
-    if pick == "Select":
-        scopebox_ref = uidoc.Selection.PickObject(ObjectType.Element, "Select a Scope Box (or Cancel for all elements in view)")
-        scopebox_elem = doc.GetElement(scopebox_ref.ElementId)
-        if get_catid(scopebox_elem) != int(BuiltInCategory.OST_VolumeOfInterest):
-            forms.alert("Selected element is not a Scope Box. Ignoring selection.")
-            scopebox_elem = None
+    from Autodesk.Revit.DB import CableTrayRun, ConduitRun
+    RUN_SUPPORT = True
 except Exception:
-    scopebox_elem = None
+    RUN_SUPPORT = False
 
-if scopebox_elem:
-    bbox = scopebox_elem.get_BoundingBox(None)
-    if bbox:
-        elements_in_scope = []
-        for el in elements:
+run_edges=[]          # edges extracted from runs
+run_curve_samples=0
+run_arcs_sampled=0
+accepted_run_ids=[]
+skipped_run_color=0
+skipped_run_empty=0
+run_member_color_cache={}
+run_member_counts=[]
+run_errors=[]
+
+def get_member_ids(run):
+    # Try multiple options
+    for attr in ("MemberIds","GetMemberIds","ElementIds","GetElementIds"):
+        try:
+            val=getattr(run, attr)
+            if callable(val):
+                res=val()
+            else:
+                res=val
+            # Convert to list of ElementId
             try:
-                locpt = el.Location.Point
-                if (bbox.Min.X <= locpt.X <= bbox.Max.X and
-                    bbox.Min.Y <= locpt.Y <= bbox.Max.Y and
-                    bbox.Min.Z <= locpt.Z <= bbox.Max.Z):
-                    elements_in_scope.append(el)
-            except Exception:
+                return list(res)
+            except:
                 pass
-        elements = elements_in_scope
-        if not elements:
-            forms.alert("No elements of selected types inside chosen Scope Box.", exitscript=True)
+        except:
+            continue
+    return []
 
-# ---------------- STEP 5: User selects tray/fitting FACE in any view, script gets face center
-forms.alert("Select a FACE on a cable tray or fitting (in any view).\nThe face center will be used as the route destination for all devices.")
+def get_run_curves(run):
+    # Attempt typical method names
+    candidates=["GetCurves","GetPathCurves","GetPath","Curves","Path"]
+    for name in candidates:
+        try:
+            attr=getattr(run,name)
+            curves=attr() if callable(attr) else attr
+            # Expect iterable of Curve
+            return list(curves)
+        except:
+            continue
+    return []
+
+def sample_curve(curve):
+    """Return list of XYZ triplets along curve (including endpoints). Lines -> 2 pts; arcs/splines segmented."""
+    global run_arcs_sampled
+    pts=[]
+    try:
+        # Try to detect line quickly
+        if curve.GetEndPoint(0) and curve.GetEndPoint(1):
+            sp=curve.GetEndPoint(0)
+            ep=curve.GetEndPoint(1)
+        else:
+            return pts
+        length=curve.Length
+        # If curve is a straight line:
+        curveClass=curve.GetType().Name.lower()
+        if "line" in curveClass and "arc" not in curveClass:
+            pts.append((sp.X,sp.Y,sp.Z))
+            pts.append((ep.X,ep.Y,ep.Z))
+            return pts
+        # Non-line: segment based on length
+        run_arcs_sampled += 1
+        seg_count = max(2, int(math.ceil(length / ARC_SEG_LEN_FT)))
+        for i in range(seg_count+1):
+            p=curve.Evaluate((1.0/seg_count)*i, True)
+            pts.append((p.X,p.Y,p.Z))
+        return pts
+    except:
+        # fallback just endpoints
+        pts.append((sp.X,sp.Y,sp.Z))
+        pts.append((ep.X,ep.Y,ep.Z))
+        return pts
+
+if RUN_SUPPORT:
+    # Collect runs only if Tray or Conduit categories are selected
+    want_tray = any(c in infra_cats for c in [BuiltInCategory.OST_CableTray])
+    want_conduit = any(c in infra_cats for c in [BuiltInCategory.OST_Conduit])
+    if want_tray:
+        tray_runs = list(FilteredElementCollector(doc).OfClass(CableTrayRun))
+    else:
+        tray_runs = []
+    if want_conduit:
+        conduit_runs = list(FilteredElementCollector(doc).OfClass(ConduitRun))
+    else:
+        conduit_runs = []
+    all_runs = tray_runs + conduit_runs
+
+    for run in all_runs:
+        try:
+            member_ids = get_member_ids(run)
+            run_member_counts.append((int(run.Id.IntegerValue), len(member_ids)))
+            members=[doc.GetElement(mid) for mid in member_ids]
+            # Evaluate color
+            member_colors = set()
+            for m in members:
+                val=get_param_value(m,"Equipment Color")
+                if val: member_colors.add(val.strip().lower())
+            run_member_color_cache[int(run.Id.IntegerValue)] = list(member_colors)
+            if use_color:
+                if not any(c == color_filter_norm for c in member_colors):
+                    skipped_run_color += 1
+                    continue
+            # Extract curves
+            curves = get_run_curves(run)
+            if not curves:
+                skipped_run_empty += 1
+                continue
+            # Build edges
+            for cv in curves:
+                sample_pts = sample_curve(cv)
+                if len(sample_pts) < 2:
+                    continue
+                for i in range(len(sample_pts)-1):
+                    a=sample_pts[i]; b=sample_pts[i+1]
+                    if distance3d(a,b) > 1e-9:
+                        run_edges.append((a,b))
+                        run_curve_samples += 1
+            accepted_run_ids.append(int(run.Id.IntegerValue))
+        except Exception as e:
+            run_errors.append("Run {} error: {}".format(run.Id, e))
+
+# -------------------- RESIDUAL (LEGACY) EXTRACTION --------------------
+residual_edges=[]
+residual_fail=[]
+residual_counts={"Tray":0,"Tray_edges":0,"TrayFitting":0,"TrayFitting_edges":0,
+                 "Conduit":0,"Conduit_edges":0,"ConduitFitting":0,"ConduitFitting_edges":0}
+
+if include_residual:
+    # Collect explicit infra elements (Active View)
+    infra_elements=[]
+    for cat in infra_cats:
+        col=(FilteredElementCollector(doc, doc.ActiveView.Id)
+             .OfCategory(cat)
+             .WhereElementIsNotElementType())
+        for el in col: infra_elements.append(el)
+
+    # Remove elements already consumed by accepted runs (if we can detect membership)
+    accepted_member_ids=set()
+    if RUN_SUPPORT and accepted_run_ids:
+        # Flatten all member ids from accepted runs for filtering duplicates
+        for run in (tray_runs+conduit_runs):
+            if int(run.Id.IntegerValue) in accepted_run_ids:
+                mids=get_member_ids(run)
+                for mid in mids:
+                    accepted_member_ids.add(int(mid.IntegerValue))
+    filtered_residual=[]
+    for el in infra_elements:
+        if int(el.Id.IntegerValue) in accepted_member_ids:
+            continue
+        # color filter
+        if use_color:
+            val=get_param_value(el,"Equipment Color")
+            if not (val and val.strip().lower()==color_filter_norm):
+                continue
+        filtered_residual.append(el)
+
+    for el in filtered_residual:
+        cid=get_catid(el)
+        if cid==int(BuiltInCategory.OST_CableTray):
+            residual_counts["Tray"]+=1
+            cl=conduit_or_tray_centerline(el)
+            if cl:
+                residual_edges.append(tuple(cl))
+                residual_counts["Tray_edges"]+=1
+            else:
+                residual_fail.append((int(str(el.Id)),"Tray centerline missing"))
+        elif cid==int(BuiltInCategory.OST_CableTrayFitting):
+            residual_counts["TrayFitting"]+=1
+            pts=fitting_connectors(el)
+            if len(pts)>=2:
+                fes=fitting_edges_from_connectors(pts)
+                residual_counts["TrayFitting_edges"]+=len(fes)
+                residual_edges.extend(fes)
+            else:
+                residual_fail.append((int(str(el.Id)),"Tray fitting connectors<2"))
+        elif cid==int(BuiltInCategory.OST_Conduit):
+            residual_counts["Conduit"]+=1
+            cl=conduit_or_tray_centerline(el)
+            if cl:
+                residual_edges.append(tuple(cl))
+                residual_counts["Conduit_edges"]+=1
+            else:
+                residual_fail.append((int(str(el.Id)),"Conduit centerline missing"))
+        elif cid==int(BuiltInCategory.OST_ConduitFitting):
+            residual_counts["ConduitFitting"]+=1
+            pts=fitting_connectors(el)
+            if len(pts)>=2:
+                fes=fitting_edges_from_connectors(pts)
+                residual_counts["ConduitFitting_edges"]+=len(fes)
+                residual_edges.extend(fes)
+            else:
+                residual_fail.append((int(str(el.Id)),"Conduit fitting connectors<2"))
+
+# -------------------- CONSOLIDATE INFRA NETWORK --------------------
+infrastructure_edges = run_edges + residual_edges
+segments_for_nearest = list(infrastructure_edges)  # simple list of pair tuples
+
+# If infrastructure empty, we will create star connections later
+# -------------------- ELECTRICAL ELEMENTS --------------------
+if select_mode=="manual":
+    try:
+        refs=uidoc.Selection.PickObjects(ObjectType.Element,
+            "Pick electrical devices (categories: {})".format(", ".join(elec_selected_names)))
+        picked=[doc.GetElement(r.ElementId) for r in refs]
+        valid=set(elec_selected_names)
+        electrical=[el for el in picked if el.Category and el.Category.Name in valid]
+        if not electrical:
+            forms.alert("No picked elements match selected categories.", exitscript=True)
+    except Exception as e:
+        forms.alert("No elements picked.\n{}".format(e), exitscript=True)
+else:
+    electrical=[]
+    for cid in elec_cat_ids:
+        electrical.extend(
+            FilteredElementCollector(doc, doc.ActiveView.Id)
+            .OfCategory(cid).WhereElementIsNotElementType().ToElements()
+        )
+
+electrical=[el for el in electrical if hasattr(el,"Location") and hasattr(el.Location,"Point") and el.Location.Point]
+if not electrical:
+    forms.alert("No electrical point-location elements found.", exitscript=True)
+
+# Optional scope box
 try:
-    picked_ref = uidoc.Selection.PickObject(ObjectType.Face, "Select a FACE on a cable tray or fitting")
+    scope_choice=forms.alert("Scope Box filter? (Select=Pick one / Skip)", options=["Select","Skip"])
+    if scope_choice=="Select":
+        sb_ref=uidoc.Selection.PickObject(ObjectType.Element,"Pick Scope Box")
+        sb_el=doc.GetElement(sb_ref.ElementId)
+        if get_catid(sb_el)==int(BuiltInCategory.OST_VolumeOfInterest):
+            bbox=sb_el.get_BoundingBox(None)
+            inside=[]
+            for e in electrical:
+                p=e.Location.Point
+                if (bbox.Min.X<=p.X<=bbox.Max.X and
+                    bbox.Min.Y<=p.Y<=bbox.Max.Y and
+                    bbox.Min.Z<=p.Z<=bbox.Max.Z):
+                    inside.append(e)
+            electrical=inside
+            if not electrical:
+                forms.alert("No electrical elements inside scope box.", exitscript=True)
+        else:
+            forms.alert("Not a scope box. Ignoring.")
+except:
+    pass
+
+# -------------------- PICK END FACE --------------------
+forms.alert("Select a FACE on infrastructure (tray/conduit/run member/fitting) for End Point.")
+try:
+    face_ref=uidoc.Selection.PickObject(ObjectType.Face,"Pick End Point Face")
 except Exception as e:
-    forms.alert("No face selected or cancelled. Script cancelled.\n\n{}".format(str(e)), exitscript=True)
+    forms.alert("End Point face not selected.\n{}".format(e), exitscript=True)
 
-picked_elem = doc.GetElement(picked_ref.ElementId)
-geom_obj = picked_elem.GetGeometryObjectFromReference(picked_ref)
-if not hasattr(geom_obj, "Evaluate"):
-    forms.alert("Selected object is not a face. Script cancelled.", exitscript=True)
+end_xyz, end_elem = face_center_from_reference(face_ref)
+if not end_xyz:
+    forms.alert("Failed to evaluate End Point.", exitscript=True)
 
-end_xyz = get_face_center(geom_obj)
+# Option to add end element geometry if not already present (residual mode)
+if include_residual and infrastructure_edges:
+    # If end element is a residual element not covered by runs and not extracted yet
+    if end_elem and end_elem.Category:
+        cid=get_catid(end_elem)
+        need_add = False
+        if cid in (int(BuiltInCategory.OST_CableTray), int(BuiltInCategory.OST_Conduit)):
+            cl = conduit_or_tray_centerline(end_elem)
+            if cl and (cl[0],cl[1]) not in infrastructure_edges:
+                need_add=True
+                infrastructure_edges.append(tuple(cl))
+                segments_for_nearest.append((cl[0],cl[1]))
+        elif cid in (int(BuiltInCategory.OST_CableTrayFitting), int(BuiltInCategory.OST_ConduitFitting)):
+            pts=fitting_connectors(end_elem)
+            if len(pts)>=2:
+                edges=fitting_edges_from_connectors(pts)
+                # Add only if not already present
+                new_added=False
+                for e in edges:
+                    if e not in infrastructure_edges:
+                        infrastructure_edges.append(e)
+                        segments_for_nearest.append(e)
+                        new_added=True
+                need_add=new_added
+        if need_add:
+            forms.alert("End element geometry appended to infrastructure network.")
 
-# ----------- STEP 6: For each device, connect to tray network by closest point on any tray segment -----------
-def pt_str(pt):
-    return "({:.3f}, {:.3f}, {:.3f})".format(pt[0], pt[1], pt[2])
+# -------------------- DEVICE CONNECTIONS (L-Jumpers) --------------------
+start_points=[]
+connection_edges=[]
+csv_rows=[]
+direct_mode = (len(segments_for_nearest)==0)
 
-connections = []
-start_points = []
-csv_lines = []
-JUMPER_WARN_DIST = 4000.0  # mm, about 13 feet
+def add_csv(eid, typ, a, b):
+    csv_rows.append((eid,typ,a,b,distance3d(a,b)))
 
-for idx, el in enumerate(elements):
-    pt = el.Location.Point
-    el_xyz = (pt.X, pt.Y, pt.Z)
-    el_id = int(str(el.Id))
-    start_points.append({
-        "element_id": el_id,
-        "point": [el_xyz[0], el_xyz[1], el_xyz[2]]
-    })
+for el in electrical:
+    p=el.Location.Point
+    xyz=(p.X,p.Y,p.Z)
+    eid=int(str(el.Id))
+    start_points.append({"element_id":eid,"point":[xyz[0],xyz[1],xyz[2]]})
 
-    # Find the closest point on ANY tray/fitting segment (not just node)
-    min_dist = None
-    min_data = None
-    for line in tray_lines:
-        closest, d, t = closest_point_on_line(el_xyz, line)
-        if (min_dist is None) or (d < min_dist):
-            min_dist = d
-            min_data = (closest, line, t)
-    if min_data is None:
-        print("[ERROR] Could not find tray network for element {} at {}".format(el_id, pt_str(el_xyz)))
-        continue
+    if not direct_mode:
+        # find nearest segment
+        best=None
+        for seg in segments_for_nearest:
+            cpt,d,t=closest_point_on_line(xyz, seg)
+            if best is None or d<best[1]:
+                best=(cpt,d)
+        if not best:
+            # fallback direct
+            if xyz!=end_xyz:
+                connection_edges.append((xyz,end_xyz))
+                add_csv(eid,"direct_fallback",xyz,end_xyz)
+            continue
+        nearest=best[0]
+        drop=(xyz[0],xyz[1],nearest[2])
+        if not isclose(xyz[2], drop[2]):
+            connection_edges.append((xyz,drop))
+            add_csv(eid,"vertical_drop",xyz,drop)
+        if (not isclose(drop[0],nearest[0]) or
+            not isclose(drop[1],nearest[1]) or
+            not isclose(drop[2],nearest[2])):
+            connection_edges.append((drop,nearest))
+            add_csv(eid,"horizontal_jumper",drop,nearest)
+    else:
+        # star
+        if xyz!=end_xyz:
+            connection_edges.append((xyz,end_xyz))
+            add_csv(eid,"direct_no_infra",xyz,end_xyz)
 
-    closest_on_tray, tray_line, tval = min_data
+# Add infrastructure edges to CSV
+for e in infrastructure_edges:
+    add_csv("INFRA","infra_edge", e[0], e[1])
 
-    # Build jumper: device (x,y,z) -> (x,y,closest_on_tray[2])
-    drop_pt = (el_xyz[0], el_xyz[1], closest_on_tray[2])
-    drop_dist = abs(el_xyz[2] - drop_pt[2])
-    jumper_dist = distance3d(drop_pt, closest_on_tray)
-
-    # Diagnostics
-    print("[DEBUG] Device {} at {}:".format(el_id, pt_str(el_xyz)))
-    print("    Drop to tray Z: {} (dist={:.1f})".format(pt_str(drop_pt), drop_dist))
-    print("    Jumper to tray: {} (dist={:.1f})".format(pt_str(closest_on_tray), jumper_dist))
-    if drop_dist > JUMPER_WARN_DIST:
-        print("    [WARN] Drop >{:.0f}mm".format(JUMPER_WARN_DIST))
-    if jumper_dist > JUMPER_WARN_DIST:
-        print("    [WARN] Horizontal jumper >{:.0f}mm".format(JUMPER_WARN_DIST))
-
-    # Always connect: device → drop, drop → tray insertion on line
-    if not isclose(el_xyz[2], drop_pt[2]):
-        connections.append((el_xyz, drop_pt))
-        csv_lines.append((el_id, "drop", el_xyz, drop_pt, drop_dist))
-    if not isclose(drop_pt[0], closest_on_tray[0]) or not isclose(drop_pt[1], closest_on_tray[1]) or not isclose(drop_pt[2], closest_on_tray[2]):
-        connections.append((drop_pt, closest_on_tray))
-        csv_lines.append((el_id, "jumper", drop_pt, closest_on_tray, jumper_dist))
-
-for idx, seg in enumerate(network_edges):
-    csv_lines.append(("TRAY", "tray_edge", seg[0], seg[1], distance3d(seg[0], seg[1])))
-
-# ---------------- EXPORT CSV for visualization/debugging
+# -------------------- EXPORT DEBUG CSV --------------------
 try:
-    script_path = os.path.abspath(__file__)
-    script_dir = os.path.dirname(script_path)
-    csv_path = os.path.join(script_dir, "tray_network_debug.csv")
-except (NameError, OSError) as e:
-    script_dir = os.getcwd()
-    csv_path = os.path.join(script_dir, "tray_network_debug.csv")
-
-with open(csv_path, "w") as f:
+    script_path=os.path.abspath(__file__)
+    script_dir=os.path.dirname(script_path)
+except:
+    script_dir=os.getcwd()
+csv_path=os.path.join(script_dir,"run_network_debug.csv")
+with open(csv_path,"w") as f:
     f.write("element_id,type,x1,y1,z1,x2,y2,z2,length\n")
-    for entry in csv_lines:
-        eid, typ, pt1, pt2, length = entry
-        f.write("{},{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.1f}\n".format(
-            eid, typ, pt1[0], pt1[1], pt1[2], pt2[0], pt2[1], pt2[2], length
-        ))
-print("[DEBUG] Exported tray network and all device jumpers to {}".format(csv_path))
+    for row in csv_rows:
+        i,typ,a,b,l=row
+        f.write("{},{},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f}\n".format(
+            i,typ,a[0],a[1],a[2],b[0],b[1],b[2],l))
 
-# ---------------- EXPORT JSON for TopologicPy
-def tolist(pt):
-    return [float(pt[0]), float(pt[1]), float(pt[2])]
+# -------------------- BUILD GRAPH (merge vertices) --------------------
+all_edges = list(infrastructure_edges) + list(connection_edges)
+vmap={}
+vertices=[]
+edges=[]
+def add_vertex(pt):
+    # Merge by tolerance
+    for existing,index in zip(vertices, range(len(vertices))):
+        if (abs(existing[0]-pt[0])<MERGE_TOL and
+            abs(existing[1]-pt[1])<MERGE_TOL and
+            abs(existing[2]-pt[2])<MERGE_TOL):
+            return index
+    idx=len(vertices)
+    vertices.append([pt[0],pt[1],pt[2]])
+    return idx
 
-all_lines = network_edges + connections
-vertices = []
-vertex_map = {}
-edges = []
+for seg in all_edges:
+    i1=add_vertex(seg[0])
+    i2=add_vertex(seg[1])
+    if i1!=i2:
+        edges.append([i1,i2])
 
-for line in all_lines:
-    pt1 = tuple(line[0])
-    pt2 = tuple(line[1])
-    if pt1 not in vertex_map:
-        vertex_map[pt1] = len(vertices)
-        vertices.append(list(pt1))
-    if pt2 not in vertex_map:
-        vertex_map[pt2] = len(vertices)
-        vertices.append(list(pt2))
-    i = vertex_map[pt1]
-    j = vertex_map[pt2]
-    edges.append([i, j])
+# -------------------- META --------------------
+meta={
+    "version":"0.1.0-run",
+    "equipment_color_filter": color_filter,
+    "use_color_filter": use_color,
+    "runs_supported": RUN_SUPPORT,
+    "accepted_run_ids": accepted_run_ids,
+    "run_edges_count": len(run_edges),
+    "run_curve_samples": run_curve_samples,
+    "run_arcs_sampled": run_arcs_sampled,
+    "skipped_run_color": skipped_run_color,
+    "skipped_run_empty": skipped_run_empty,
+    "run_member_counts": run_member_counts[:30],
+    "run_member_color_cache": dict(list(run_member_color_cache.items())[:30]),
+    "run_errors_sample": run_errors[:10],
+    "include_residual": include_residual,
+    "residual_edge_count": len(residual_edges),
+    "residual_counts": residual_counts,
+    "residual_fail_samples": residual_fail[:10],
+    "segments_built": len(infrastructure_edges),
+    "direct_mode": direct_mode,
+    "electrical_elements_count": len(electrical),
+    "unit_notice": "All coordinates & lengths in internal feet."
+}
 
-output_data = {
+graph_data={
+    "meta": meta,
     "vertices": vertices,
     "edges": edges,
     "start_points": start_points,
-    "end_point": tolist(end_xyz)
+    "end_point": [end_xyz[0],end_xyz[1],end_xyz[2]]
 }
 
-try:
-    json_path = os.path.join(script_dir, "topologic.JSON")
-except (NameError, OSError) as e:
-    json_path = os.path.join(os.getcwd(), "topologic.JSON")
+json_path=os.path.join(script_dir,"topologic.JSON")
+with open(json_path,"w") as f:
+    json.dump(graph_data,f,indent=2)
 
-with open(json_path, 'w') as f:
-    json.dump(output_data, f, indent=2)
+forms.alert(
+    "RUN graph built.\nVertices:{} Edges:{} Devices:{}\nRunEdges:{} ResidualEdges:{} DirectMode:{}\nJSON:{}\nCSV:{}"
+    .format(len(vertices), len(edges), len(start_points),
+            len(run_edges), len(residual_edges), direct_mode, json_path, csv_path)
+)
 
-forms.alert("Graph data and tray network debug CSV exported for TopologicPy.\n{}\n{}\nNow running TopologicPy calculation for shortest paths...".format(json_path, csv_path))
-
-# ---------------- AUTO RUN STEP 5: calc_shortest.py (CPython)
+# -------------------- RUN calc_shortest.py --------------------
 PYTHON3_PATH = r"C:\Users\JacksonAugusto\AppData\Local\Programs\Python\Python312\python.exe"
-calc_shortest_path = os.path.join(script_dir, "calc_shortest.py")
-if not os.path.exists(calc_shortest_path):
-    forms.alert("calc_shortest.py not found in script folder. Please ensure it is present for automatic shortest path calculation.", exitscript=False)
+calc_script=os.path.join(script_dir,"calc_shortest.py")
+if not os.path.exists(calc_script):
+    forms.alert("calc_shortest.py not found (skipping computation).", exitscript=False)
 else:
     try:
-        subprocess.check_call([PYTHON3_PATH, calc_shortest_path], cwd=script_dir)
+        subprocess.check_call([PYTHON3_PATH, calc_script], cwd=script_dir)
     except Exception as e:
-        forms.alert("Could not execute calc_shortest.py automatically with Python 3.12.\nError: {}\nPlease run manually:\n{}".format(str(e), calc_shortest_path), exitscript=False)
+        forms.alert("calc_shortest.py failed:\n{}".format(e), exitscript=False)
 
-# ---------------- Last Step: update_cable_lengths.py (IronPython)
-update_script = os.path.join(script_dir, "update_cable_lengths.py")
+# -------------------- UPDATE PARAMETERS --------------------
+update_script=os.path.join(script_dir,"update_cable_lengths.py")
 if not os.path.exists(update_script):
-    forms.alert("update_cable_lengths.py not found in script folder. Please ensure it is present.", exitscript=True)
+    forms.alert("update_cable_lengths.py not found.", exitscript=True)
 else:
     try:
         execfile(update_script)
     except Exception as e:
-        forms.alert("Could not execute '{}': {}".format(update_script, str(e)), exitscript=True)
+        forms.alert("Error executing update_cable_lengths.py:\n{}".format(e), exitscript=True)
 
-forms.alert("Cable Length Calculation process complete!\nAll steps ran successfully.\nCheck results in Revit and output files.")
+forms.alert("Run-based Cable Length Calculation COMPLETE (run_script v0.1.0). Review results.")

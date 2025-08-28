@@ -1,5 +1,5 @@
 {
-  "Uuid": "c19a1c60-39e9-4ef2-a94a-ae4bf582e294",
+  "Uuid": "600ffd45-ff9b-4358-bf6b-8dfab6283da6",
   "IsCustomNode": false,
   "Description": "",
   "Name": "Check json Topology",
@@ -10,15 +10,36 @@
   "Outputs": [],
   "Nodes": [
     {
+      "ConcreteType": "CoreNodeModels.Input.Filename, CoreNodeModels",
+      "Id": "dcd67bb8cb174bfd8eb46b274ec43096",
+      "NodeType": "ExtensionNode",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "af44f2bcacaa4d169e8520dedc4fb9f5",
+          "Name": "",
+          "Description": "File Path",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Allows you to select a file on the system and returns its file path",
+      "HintPath": "C:\\Users\\JacksonAugusto\\Documents\\GitHub\\WWTpyRevit\\WWT Tools.extension\\WWT Tools.tab\\Work Set.panel\\Cable Length Calculation.pushbutton\\topologic.JSON",
+      "InputValue": "C:\\Users\\JacksonAugusto\\Documents\\GitHub\\WWTpyRevit\\WWT Tools.extension\\WWT Tools.tab\\Work Set.panel\\Cable Length Calculation.pushbutton\\topologic.JSON"
+    },
+    {
       "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
-      "Code": "import json\r\nimport clr\r\nclr.AddReference('ProtoGeometry')\r\nfrom Autodesk.DesignScript.Geometry import Point, Line\r\n\r\n# IN[0] = path to the JSON file\r\njson_path = IN[0]\r\n\r\n# Read and parse JSON\r\nwith open(json_path, 'r') as f:\r\n    data = json.load(f)\r\n\r\nvertices = data[\"vertices\"]\r\nedges = data[\"edges\"]\r\n\r\n# Create Dynamo points for each vertex\r\npoints = [Point.ByCoordinates(*v) for v in vertices]\r\n\r\n# Create lines for each edge\r\nlines = []\r\nfor e in edges:\r\n    i, j = e\r\n    p1 = points[i]\r\n    p2 = points[j]\r\n    lines.append(Line.ByStartPointEndPoint(p1, p2))\r\n\r\n# Output points and lines to Dynamo\r\nOUT = points, lines",
+      "Code": "# Dynamo Python: Visualize topologic.JSON (graph export from pyRevit script)\r\n# Compatible with IronPython2 and CPython3.\r\n#\r\n# IN[0] : path (string) to topologic.JSON\r\n#\r\n# OUT:\r\n#   0 -> Status / Messages\r\n#   1 -> DS Points (vertices) list\r\n#   2 -> DS Lines (edges) list (Line.ByStartPointEndPoint)\r\n#   3 -> End Point (DS Point or None)\r\n#   4 -> Start Points (list of DS Points in same order as start_points array)\r\n#   5 -> Start Point Element IDs (parallel list of element_id)\r\n#   6 -> Meta dictionary (if present)\r\n#   7 -> Vertex Count\r\n#   8 -> Edge Count\r\n#   9 -> Mapping (vertex index -> Point) (list)\r\n#\r\n# Notes:\r\n# - Assumes coordinates are in Revit internal units (feet). No unit conversion performed.\r\n# - Handles absence of meta gracefully.\r\n# - If JSON contains duplicate vertices (rare), returns them as-is.\r\n#\r\nimport json, os, sys, traceback\r\n\r\n# Dynamo geometry imports (works in both engines)\r\ntry:\r\n    import clr\r\n    clr.AddReference('ProtoGeometry')\r\n    from Autodesk.DesignScript.Geometry import Point as DSPoint\r\n    from Autodesk.DesignScript.Geometry import Line\r\nexcept Exception as e:\r\n    OUT = [\"ERROR: Could not import Dynamo geometry: {}\".format(e)], [], [], None, [], [], {}, 0, 0, []\r\n    raise\r\n\r\npath = IN[0] if len(IN) > 0 else None\r\nmessages = []\r\n\r\ndef fail(msg):\r\n    return [msg], [], [], None, [], [], {}, 0, 0, []\r\n\r\nif not path or not isinstance(path, str) or path.strip()==\"\":\r\n    OUT = fail(\"No file path provided for topologic.JSON.\")\r\nelse:\r\n    path = path.strip('\"').strip()\r\n    if not os.path.exists(path):\r\n        OUT = fail(\"File not found: {}\".format(path))\r\n    else:\r\n        try:\r\n            with open(path, 'r') as f:\r\n                data = json.load(f)\r\n            vertices = data.get(\"vertices\", [])\r\n            edges = data.get(\"edges\", [])\r\n            start_points_raw = data.get(\"start_points\", [])\r\n            end_pt_raw = data.get(\"end_point\", None)\r\n            meta = data.get(\"meta\", {})\r\n\r\n            # Build DS Points\r\n            ds_vertices = []\r\n            for v in vertices:\r\n                try:\r\n                    ds_vertices.append(DSPoint.ByCoordinates(float(v[0]), float(v[1]), float(v[2])))\r\n                except:\r\n                    ds_vertices.append(None)\r\n                    messages.append(\"Vertex conversion failed for: {}\".format(v))\r\n\r\n            # Build DS Lines (edges reference indices)\r\n            ds_edges = []\r\n            for e in edges:\r\n                try:\r\n                    a, b = int(e[0]), int(e[1])\r\n                    if 0 <= a < len(ds_vertices) and 0 <= b < len(ds_vertices):\r\n                        pa = ds_vertices[a]; pb = ds_vertices[b]\r\n                        if pa and pb:\r\n                            ds_edges.append(Line.ByStartPointEndPoint(pa, pb))\r\n                        else:\r\n                            messages.append(\"Null vertex in edge {} -> skipped\".format(e))\r\n                    else:\r\n                        messages.append(\"Edge index out of range: {}\".format(e))\r\n                except Exception as ex:\r\n                    messages.append(\"Edge parse error {} : {}\".format(e, ex))\r\n\r\n            # Start points\r\n            sp_points = []\r\n            sp_ids = []\r\n            for sp in start_points_raw:\r\n                try:\r\n                    p = sp.get(\"point\")\r\n                    eid = sp.get(\"element_id\")\r\n                    if p and len(p) == 3:\r\n                        sp_points.append(DSPoint.ByCoordinates(float(p[0]), float(p[1]), float(p[2])))\r\n                    else:\r\n                        sp_points.append(None)\r\n                        messages.append(\"Invalid start point coords: {}\".format(p))\r\n                    sp_ids.append(eid)\r\n                except Exception as ex:\r\n                    messages.append(\"Start point conversion error: {}\".format(ex))\r\n                    sp_points.append(None)\r\n                    sp_ids.append(None)\r\n\r\n            # End point\r\n            end_pt = None\r\n            if end_pt_raw and len(end_pt_raw) == 3:\r\n                try:\r\n                    end_pt = DSPoint.ByCoordinates(float(end_pt_raw[0]), float(end_pt_raw[1]), float(end_pt_raw[2]))\r\n                except Exception as ex:\r\n                    messages.append(\"End point conversion error: {}\".format(ex))\r\n\r\n            messages.insert(0, \"Loaded topologic.JSON successfully.\")\r\n            messages.append(\"Vertices: {} | Edges: {} | StartPoints: {}\"\r\n                            .format(len(vertices), len(edges), len(sp_points)))\r\n\r\n            OUT = [\r\n                messages,          # 0\r\n                ds_vertices,       # 1\r\n                ds_edges,          # 2\r\n                end_pt,            # 3\r\n                sp_points,         # 4\r\n                sp_ids,            # 5\r\n                meta,              # 6\r\n                len(vertices),     # 7\r\n                len(edges),        # 8\r\n                ds_vertices        # 9 (simple mapping list)\r\n            ]\r\n        except Exception as e:\r\n            tb = traceback.format_exc()\r\n            OUT = fail(\"Failed parsing JSON: {}\\n{}\".format(e, tb))",
       "Engine": "CPython3",
       "VariableInputPorts": true,
-      "Id": "69c3e99629aa4e98815d8d836dbe427b",
+      "Id": "383cf8973b224494bc49069d2203d5fd",
       "NodeType": "PythonScriptNode",
       "Inputs": [
         {
-          "Id": "cab1d9615c20440e97bf4ba644b85bed",
+          "Id": "213144805f584190a540d3c9270fc1df",
           "Name": "IN[0]",
           "Description": "Input #0",
           "UsingDefaultValue": false,
@@ -29,7 +50,39 @@
       ],
       "Outputs": [
         {
-          "Id": "5d898899be044fb3ac364611f7dd0378",
+          "Id": "e7cda9adab064747a2d3235ec85e80ef",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "Code": "# Dynamo Python: Robust visualization of topologic_results.json\r\n# Compatible with IronPython2 and CPython3 engines.\r\n#\r\n# IN[0] : File path to topologic_results.json\r\n#\r\n# OUT indexes:\r\n# 0 messages (list of strings)\r\n# 1 meta dict (or {})\r\n# 2 element_ids_str (list of element_id as STRING)\r\n# 3 element_ids_int (list of element_id as INT or None where not numeric)\r\n# 4 lengths (list, float or None)\r\n# 5 path_points (list of lists of DS Points)\r\n# 6 path_polycurves (list of PolyCurve or None)\r\n# 7 id_to_length_dict (keys are STRING)\r\n# 8 success_count\r\n# 9 failure_count\r\n# 10 merged_polycurve (single PolyCurve of all path segments or None)\r\n#\r\nimport json, os, sys, traceback\r\n\r\n# Geometry imports\r\ntry:\r\n    import clr\r\n    clr.AddReference('ProtoGeometry')\r\n    from Autodesk.DesignScript.Geometry import Point as DSPoint\r\n    from Autodesk.DesignScript.Geometry import Line, PolyCurve\r\nexcept Exception as e:\r\n    OUT = [[\"ERROR importing Dynamo geometry: {}\".format(e)], {}, [], [], [], [], [], {}, 0, 0, None]\r\n    raise\r\n\r\npath = IN[0] if len(IN)>0 else None\r\nmessages=[]\r\n\r\ndef fail(msg):\r\n    return [msg], {}, [], [], [], [], [], {}, 0, 0, None\r\n\r\ndef to_float(x):\r\n    try:\r\n        # Handle numpy types or anything convertible\r\n        return float(x)\r\n    except:\r\n        return None\r\n\r\ndef coerce_point_list(raw):\r\n    \"\"\"Return list of (x,y,z) floats or []\"\"\"\r\n    pts=[]\r\n    if not raw: return pts\r\n    for r in raw:\r\n        try:\r\n            if isinstance(r,(list,tuple)) and len(r)>=3:\r\n                x=to_float(r[0]); y=to_float(r[1]); z=to_float(r[2])\r\n                if None not in (x,y,z):\r\n                    pts.append((x,y,z))\r\n        except:\r\n            pass\r\n    return pts\r\n\r\ndef make_ds_points(pt_tuples):\r\n    ds=[]\r\n    for p in pt_tuples:\r\n        try:\r\n            ds.append(DSPoint.ByCoordinates(p[0],p[1],p[2]))\r\n        except:\r\n            ds.append(None)\r\n    return ds\r\n\r\ndef build_polycurve(ds_pts):\r\n    # Filter None & duplicates\r\n    clean=[]\r\n    last=None\r\n    for p in ds_pts:\r\n        if p and (last is None or p.DistanceTo(last)>1e-10):\r\n            clean.append(p); last=p\r\n    if len(clean)<2:\r\n        return None\r\n    try:\r\n        lines=[]\r\n        for i in range(len(clean)-1):\r\n            a=clean[i]; b=clean[i+1]\r\n            if a.DistanceTo(b)>1e-10:\r\n                lines.append(Line.ByStartPointEndPoint(a,b))\r\n        if not lines:\r\n            return None\r\n        return PolyCurve.ByJoinedCurves(lines)\r\n    except:\r\n        return None\r\n\r\nif not path or not isinstance(path,str) or path.strip()==\"\":\r\n    OUT = fail(\"No file path provided.\")\r\nelse:\r\n    path=path.strip('\"').strip()\r\n    if not os.path.exists(path):\r\n        OUT = fail(\"File not found: {}\".format(path))\r\n    else:\r\n        try:\r\n            with open(path,'r') as f:\r\n                raw = json.load(f)\r\n        except Exception as e:\r\n            OUT = fail(\"JSON load error: {}\".format(e))\r\n        else:\r\n            meta={}\r\n            results=[]\r\n            # Schema detection\r\n            if isinstance(raw, dict) and \"results\" in raw:\r\n                meta = raw.get(\"meta\", {})\r\n                results = raw.get(\"results\", [])\r\n            elif isinstance(raw, list):\r\n                results = raw\r\n                meta = {}\r\n            elif isinstance(raw, dict):\r\n                # Possibly dict keyed by element_id; separate meta if present\r\n                meta = raw.get(\"meta\", {})\r\n                # Build list from numeric/string keys excluding 'meta'\r\n                for k,v in raw.items():\r\n                    if k==\"meta\": continue\r\n                    if isinstance(v, dict):\r\n                        rec = v.copy()\r\n                        rec.setdefault(\"element_id\", k)\r\n                        results.append(rec)\r\n            else:\r\n                OUT = fail(\"Unrecognized JSON structure.\")\r\n                sys.exit()\r\n\r\n            element_ids_str=[]\r\n            element_ids_int=[]\r\n            lengths=[]\r\n            path_points_ds=[]\r\n            path_poly=[]\r\n            id_to_length={}\r\n            success=0\r\n            failure=0\r\n\r\n            for idx,res in enumerate(results):\r\n                if not isinstance(res, dict):\r\n                    messages.append(\"Skipping non-dict result at index {}\".format(idx))\r\n                    failure+=1\r\n                    element_ids_str.append(None); element_ids_int.append(None)\r\n                    lengths.append(None); path_points_ds.append([]); path_poly.append(None)\r\n                    continue\r\n                eid_raw = res.get(\"element_id\", res.get(\"id\", None))\r\n                # Convert element id to string\r\n                eid_str = str(eid_raw) if eid_raw is not None else \"None\"\r\n                try:\r\n                    eid_int = int(eid_raw)\r\n                except:\r\n                    eid_int = None\r\n                length = res.get(\"length\", res.get(\"path_length\", None))\r\n                if length is not None:\r\n                    length = to_float(length)\r\n                # Find path coordinates (try multiple keys)\r\n                coord_keys = [\"vertex_path_xyz\",\"path_xyz\",\"path\",\"points\",\"coords\"]\r\n                coord_data = None\r\n                for k in coord_keys:\r\n                    if k in res:\r\n                        coord_data = res[k]\r\n                        break\r\n                pts = coerce_point_list(coord_data)\r\n                ds_pts = make_ds_points(pts)\r\n                poly = build_polycurve(ds_pts)\r\n\r\n                element_ids_str.append(eid_str)\r\n                element_ids_int.append(eid_int)\r\n                lengths.append(length)\r\n                path_points_ds.append(ds_pts)\r\n                path_poly.append(poly)\r\n                id_to_length[eid_str]=length\r\n\r\n                if length is not None and poly:\r\n                    success+=1\r\n                else:\r\n                    failure+=1\r\n                    if length is None:\r\n                        messages.append(\"No length for element_id {}\".format(eid_str))\r\n                    if not poly:\r\n                        messages.append(\"No polycurve for element_id {} (pts={})\".format(eid_str, len(ds_pts)))\r\n\r\n            # Attempt merged polycurve (all segments)\r\n            merged_poly=None\r\n            try:\r\n                all_lines=[]\r\n                for pc in path_poly:\r\n                    if pc:\r\n                        # Decompose polycurve into lines\r\n                        try:\r\n                            sub_curves=pc.Curves()\r\n                            for sc in sub_curves:\r\n                                all_lines.append(sc)\r\n                        except:\r\n                            all_lines.append(pc)\r\n                if all_lines:\r\n                    merged_poly = PolyCurve.ByJoinedCurves(all_lines)\r\n            except Exception as e:\r\n                messages.append(\"Merged polycurve creation failed: {}\".format(e))\r\n                merged_poly=None\r\n\r\n            messages.insert(0, \"Loaded {} result records. Success: {} Failure: {}\".format(len(results), success, failure))\r\n            OUT = [\r\n                messages,           # 0\r\n                meta,               # 1\r\n                element_ids_str,    # 2\r\n                element_ids_int,    # 3\r\n                lengths,            # 4\r\n                path_points_ds,     # 5\r\n                path_poly,          # 6\r\n                id_to_length,       # 7 (string keys to avoid Int64 cast issues)\r\n                success,            # 8\r\n                failure,            # 9\r\n                merged_poly         # 10\r\n            ]",
+      "Engine": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "0ca28f3674604398a3938bc7bbdc69b3",
+      "NodeType": "PythonScriptNode",
+      "Inputs": [
+        {
+          "Id": "3153e6623b7e4ef1b0be458afe4c04b0",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "361d7b4b9d97479482009879606ed5cd",
           "Name": "OUT",
           "Description": "Result of the python script",
           "UsingDefaultValue": false,
@@ -43,12 +96,12 @@
     },
     {
       "ConcreteType": "CoreNodeModels.Input.Filename, CoreNodeModels",
-      "Id": "f2a6cc4f700a46efac606122dddcbfb1",
+      "Id": "eaa281ca188b44dca87a407fb889d3a6",
       "NodeType": "ExtensionNode",
       "Inputs": [],
       "Outputs": [
         {
-          "Id": "5d980878a48c406fae570ef1afd57716",
+          "Id": "db602e6595394efd9a985c5eb14c973e",
           "Name": "",
           "Description": "File Path",
           "UsingDefaultValue": false,
@@ -59,18 +112,22 @@
       ],
       "Replication": "Disabled",
       "Description": "Allows you to select a file on the system and returns its file path",
-      "HintPath": "C:\\WWT Tools.extension\\revit-mcp-python.extension\\WWT Tools.tab\\Development.panel\\DEV.pulldown\\Cable Length Calculation.pushbutton\\topologic.JSON",
-      "InputValue": ".\\topologic.JSON"
+      "HintPath": "C:\\Users\\JacksonAugusto\\Documents\\GitHub\\WWTpyRevit\\WWT Tools.extension\\WWT Tools.tab\\Work Set.panel\\Cable Length Calculation.pushbutton\\topologic_results.json",
+      "InputValue": "C:\\Users\\JacksonAugusto\\Documents\\GitHub\\WWTpyRevit\\WWT Tools.extension\\WWT Tools.tab\\Work Set.panel\\Cable Length Calculation.pushbutton\\topologic_results.json"
     },
     {
-      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
-      "Id": "d1f187494a374f80b2d157b8c4d0cb29",
-      "NodeType": "FunctionNode",
+      "ConcreteType": "DataShapesZT.DataShapesZT.GeomPreviewNodeModel, DataShapesZT",
+      "SliderValue": 255.0,
+      "rValue": "255",
+      "gValue": "26",
+      "bValue": "76",
+      "Id": "615b0f583f174f1882622e2d62574d16",
+      "NodeType": "ExtensionNode",
       "Inputs": [
         {
-          "Id": "97e50d7dd32b499a9edfe1c55f4927e6",
-          "Name": "topologies",
-          "Description": "A set of Topologies\n\nTopology[]",
+          "Id": "5a733321358b4c00887b097403a98ccc",
+          "Name": "Geometry",
+          "Description": "Input Geometry",
           "UsingDefaultValue": false,
           "Level": 2,
           "UseLevels": false,
@@ -79,67 +136,31 @@
       ],
       "Outputs": [
         {
-          "Id": "eaae257d963840f4af981885e5c0eb53",
-          "Name": "Cluster",
-          "Description": "The created Cluster",
+          "Id": "79752b6d22d84f029aefe9a2966684dd",
+          "Name": "GeometryColor",
+          "Description": "Display Geometry",
           "UsingDefaultValue": false,
           "Level": 2,
           "UseLevels": false,
           "KeepListStructure": false
         }
       ],
-      "FunctionSignature": "Topologic.Cluster.ByTopologies@Topologic.Topology[]",
-      "Replication": "Auto",
-      "Description": "Creates a Cluster by a set of Topologies.\n\nCluster.ByTopologies (topologies: Topology[]): Cluster"
+      "Replication": "Disabled",
+      "Description": "UI Node to customize geometry previews."
     },
     {
-      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
-      "Id": "547b393a6c8b4b8f9e53a5cb442dfb97",
-      "NodeType": "FunctionNode",
+      "ConcreteType": "DataShapesZT.DataShapesZT.GeomPreviewNodeModel, DataShapesZT",
+      "SliderValue": 255.0,
+      "rValue": "36",
+      "gValue": "53",
+      "bValue": "255",
+      "Id": "d63d1b17a5be409e8da20c72b3e4bd05",
+      "NodeType": "ExtensionNode",
       "Inputs": [
         {
-          "Id": "2e4dbf70b9ad4bb997d9c6a1a927c8bf",
-          "Name": "geometry",
-          "Description": "A geometry\n\nGeometry",
-          "UsingDefaultValue": false,
-          "Level": 2,
-          "UseLevels": false,
-          "KeepListStructure": false
-        },
-        {
-          "Id": "fad72d8099c9493c9c3ff8814911040b",
-          "Name": "tolerance",
-          "Description": "A positive tolerance value\n\ndouble\nDefault value : 0.0001",
-          "UsingDefaultValue": true,
-          "Level": 2,
-          "UseLevels": false,
-          "KeepListStructure": false
-        }
-      ],
-      "Outputs": [
-        {
-          "Id": "68305145c4754cabb2472a965f3b5138",
-          "Name": "Topology",
-          "Description": "The created Topology",
-          "UsingDefaultValue": false,
-          "Level": 2,
-          "UseLevels": false,
-          "KeepListStructure": false
-        }
-      ],
-      "FunctionSignature": "Topologic.Topology.ByGeometry@Autodesk.DesignScript.Geometry.Geometry,double",
-      "Replication": "Auto",
-      "Description": "Creates a Topology by geometry.\n\nTopology.ByGeometry (geometry: Geometry, tolerance: double = 0.0001): Topology"
-    },
-    {
-      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
-      "Id": "120a34338baf42129e287b3e3be09498",
-      "NodeType": "FunctionNode",
-      "Inputs": [
-        {
-          "Id": "4e1287e8d8c94e42af89cf25751a903e",
-          "Name": "topology",
-          "Description": "Topologic.Topology",
+          "Id": "68d6a1a25b65428fb49671e5fdaafd4a",
+          "Name": "Geometry",
+          "Description": "Input Geometry",
           "UsingDefaultValue": false,
           "Level": 2,
           "UseLevels": false,
@@ -148,104 +169,72 @@
       ],
       "Outputs": [
         {
-          "Id": "3f89a52d54c142248b3bf0b2ecc2ecda",
-          "Name": "Topology",
-          "Description": "The result of the SelfMerge operation",
+          "Id": "f020b632f29d4d3a821f1c874916987e",
+          "Name": "GeometryColor",
+          "Description": "Display Geometry",
           "UsingDefaultValue": false,
           "Level": 2,
           "UseLevels": false,
           "KeepListStructure": false
         }
       ],
-      "FunctionSignature": "Topologic.Topology.SelfMerge",
-      "Replication": "Auto",
-      "Description": "Merges the sub-topologies of the input Topology.\n\nTopology.SelfMerge ( ): Topology"
-    },
-    {
-      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
-      "Id": "b82d395c87ac4d8280d8529ed564186a",
-      "NodeType": "FunctionNode",
-      "Inputs": [
-        {
-          "Id": "c626775971cd437ca5e84b4f8d8a905b",
-          "Name": "topology",
-          "Description": "Topologic.Topology",
-          "UsingDefaultValue": false,
-          "Level": 2,
-          "UseLevels": false,
-          "KeepListStructure": false
-        }
-      ],
-      "Outputs": [
-        {
-          "Id": "256c9b2fee944b2b885a526fd38783c5",
-          "Name": "Wire[]",
-          "Description": "A list of Wires constituent to the Topology",
-          "UsingDefaultValue": false,
-          "Level": 2,
-          "UseLevels": false,
-          "KeepListStructure": false
-        }
-      ],
-      "FunctionSignature": "Topologic.Topology.Wires",
-      "Replication": "Auto",
-      "Description": "Returns the Wires constituent to the Topology.\n\nTopology.Wires: Wire[]"
+      "Replication": "Disabled",
+      "Description": "UI Node to customize geometry previews."
     }
   ],
   "Connectors": [
     {
-      "Start": "5d898899be044fb3ac364611f7dd0378",
-      "End": "2e4dbf70b9ad4bb997d9c6a1a927c8bf",
-      "Id": "ef6752beae704a46b704398f246d91c3",
+      "Start": "af44f2bcacaa4d169e8520dedc4fb9f5",
+      "End": "213144805f584190a540d3c9270fc1df",
+      "Id": "72f5babd188f433ea760abf94b62f15b",
       "IsHidden": "False"
     },
     {
-      "Start": "5d980878a48c406fae570ef1afd57716",
-      "End": "cab1d9615c20440e97bf4ba644b85bed",
-      "Id": "0de0af7eb4944cdaae8dbe2e3448dcc2",
+      "Start": "e7cda9adab064747a2d3235ec85e80ef",
+      "End": "68d6a1a25b65428fb49671e5fdaafd4a",
+      "Id": "7bc627fc23304354934f557b014d1eb4",
       "IsHidden": "False"
     },
     {
-      "Start": "eaae257d963840f4af981885e5c0eb53",
-      "End": "4e1287e8d8c94e42af89cf25751a903e",
-      "Id": "3b35ce9fe36c48b99f0ee13e3da9529e",
+      "Start": "361d7b4b9d97479482009879606ed5cd",
+      "End": "5a733321358b4c00887b097403a98ccc",
+      "Id": "8c44cd130b29465e81c5b012d9801271",
       "IsHidden": "False"
     },
     {
-      "Start": "68305145c4754cabb2472a965f3b5138",
-      "End": "97e50d7dd32b499a9edfe1c55f4927e6",
-      "Id": "eeeb14b30f104ec5803e3385156d3de0",
-      "IsHidden": "False"
-    },
-    {
-      "Start": "3f89a52d54c142248b3bf0b2ecc2ecda",
-      "End": "c626775971cd437ca5e84b4f8d8a905b",
-      "Id": "6a4a767529d649cdbeeefd4431a11659",
+      "Start": "db602e6595394efd9a985c5eb14c973e",
+      "End": "3153e6623b7e4ef1b0be458afe4c04b0",
+      "Id": "09c61785f54f4c1cac1dadbe4d67fee4",
       "IsHidden": "False"
     }
   ],
   "Dependencies": [],
   "NodeLibraryDependencies": [
     {
-      "Name": "Topologic",
-      "Version": "1.4.0",
+      "Name": "Data-Shapes",
+      "Version": "2025.3.120",
       "ReferenceType": "Package",
       "Nodes": [
-        "d1f187494a374f80b2d157b8c4d0cb29",
-        "547b393a6c8b4b8f9e53a5cb442dfb97",
-        "120a34338baf42129e287b3e3be09498",
-        "b82d395c87ac4d8280d8529ed564186a"
+        "615b0f583f174f1882622e2d62574d16",
+        "d63d1b17a5be409e8da20c72b3e4bd05"
       ]
     },
     {
       "Name": "topologic.JSON",
       "ReferenceType": "External",
       "Nodes": [
-        "f2a6cc4f700a46efac606122dddcbfb1"
+        "dcd67bb8cb174bfd8eb46b274ec43096"
+      ]
+    },
+    {
+      "Name": "topologic_results.json",
+      "ReferenceType": "External",
+      "Nodes": [
+        "eaa281ca188b44dca87a407fb889d3a6"
       ]
     }
   ],
-  "EnableLegacyPolyCurveBehavior": true,
+  "EnableLegacyPolyCurveBehavior": null,
   "Thumbnail": "",
   "GraphDocumentationURL": null,
   "ExtensionWorkspaceData": [
@@ -281,82 +270,82 @@
     },
     "Camera": {
       "Name": "_Background Preview",
-      "EyeX": 63.798866271972656,
-      "EyeY": 30.36150550842285,
-      "EyeZ": -41.235137939453125,
-      "LookX": -87.4976806640625,
-      "LookY": -44.70732116699219,
-      "LookZ": 15.392402648925781,
-      "UpX": -0.24381768703460693,
-      "UpY": 0.9688721895217896,
-      "UpZ": 0.04289206489920616
+      "EyeX": -45.31781768798828,
+      "EyeY": 36.26472473144531,
+      "EyeZ": 42.47948455810547,
+      "LookX": 22.516674041748047,
+      "LookY": -30.556827545166016,
+      "LookZ": -83.90057373046875,
+      "UpX": 0.03158741071820259,
+      "UpY": 0.9925462007522583,
+      "UpZ": -0.1177048310637474
     },
     "ConnectorPins": [],
     "NodeViews": [
       {
-        "Id": "69c3e99629aa4e98815d8d836dbe427b",
-        "Name": "Python Script",
-        "IsSetAsInput": false,
-        "IsSetAsOutput": false,
-        "Excluded": false,
-        "ShowGeometry": true,
-        "X": 4.74906049763581,
-        "Y": -16.25351880170612
-      },
-      {
-        "Id": "f2a6cc4f700a46efac606122dddcbfb1",
+        "Id": "dcd67bb8cb174bfd8eb46b274ec43096",
         "Name": "File Path",
         "IsSetAsInput": false,
         "IsSetAsOutput": false,
         "Excluded": false,
         "ShowGeometry": true,
-        "X": -231.56822439293342,
-        "Y": -18.358857139937953
+        "X": 25.333333333333258,
+        "Y": 90.66666666666663
       },
       {
-        "Id": "d1f187494a374f80b2d157b8c4d0cb29",
-        "Name": "Cluster.ByTopologies",
+        "Id": "383cf8973b224494bc49069d2203d5fd",
+        "Name": "Python Script",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": false,
+        "X": 688.0,
+        "Y": 93.3333333333334
+      },
+      {
+        "Id": "0ca28f3674604398a3938bc7bbdc69b3",
+        "Name": "Python Script",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": false,
+        "X": 687.9431632192466,
+        "Y": 274.13997573249594
+      },
+      {
+        "Id": "eaa281ca188b44dca87a407fb889d3a6",
+        "Name": "File Path",
         "IsSetAsInput": false,
         "IsSetAsOutput": false,
         "Excluded": false,
         "ShowGeometry": true,
-        "X": 527.6843727615415,
-        "Y": -15.877932824104136
+        "X": -34.263441973610384,
+        "Y": 274.24084898421097
       },
       {
-        "Id": "547b393a6c8b4b8f9e53a5cb442dfb97",
-        "Name": "Topology.ByGeometry",
+        "Id": "615b0f583f174f1882622e2d62574d16",
+        "Name": "GeomPreview",
         "IsSetAsInput": false,
         "IsSetAsOutput": false,
         "Excluded": false,
         "ShowGeometry": true,
-        "X": 243.38572910396795,
-        "Y": -25.2504155820462
+        "X": 1030.6917828935395,
+        "Y": 309.5156126367016
       },
       {
-        "Id": "120a34338baf42129e287b3e3be09498",
-        "Name": "Topology.SelfMerge",
+        "Id": "d63d1b17a5be409e8da20c72b3e4bd05",
+        "Name": "GeomPreview",
         "IsSetAsInput": false,
         "IsSetAsOutput": false,
         "Excluded": false,
         "ShowGeometry": true,
-        "X": 803.4049991819766,
-        "Y": -11.178266154156944
-      },
-      {
-        "Id": "b82d395c87ac4d8280d8529ed564186a",
-        "Name": "Topology.Wires",
-        "IsSetAsInput": false,
-        "IsSetAsOutput": false,
-        "Excluded": false,
-        "ShowGeometry": true,
-        "X": 950.2405623897346,
-        "Y": 328.57423382123966
+        "X": 1015.9595144808968,
+        "Y": 97.4377867333832
       }
     ],
     "Annotations": [],
-    "X": 279.5769377817325,
-    "Y": 46.87468235928685,
-    "Zoom": 0.8535625198372361
+    "X": 39.506342681087744,
+    "Y": -37.501472204816594,
+    "Zoom": 0.4405253918378805
   }
 }
