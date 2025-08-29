@@ -1,0 +1,185 @@
+#! python3
+# calc_shortest.py
+# Version: 3.6.0 (2025-08-21)
+# Author: JacksonPinto
+# Description:
+#   Robust TopologicPy shortest path calculation for cable tray network.
+#   Reads topologic.JSON, builds graph, maps start/end points, computes shortest paths, and writes results with error handling & diagnostics.
+
+import json
+import sys
+import os
+import math
+
+from topologicpy.Topology import Topology
+from topologicpy.Vertex import Vertex
+from topologicpy.Edge import Edge
+from topologicpy.Cluster import Cluster
+from topologicpy.Graph import Graph
+from topologicpy.Wire import Wire
+
+def dist3(a, b):
+    """Euclidean distance between 3D points, with type and length check."""
+    if not (isinstance(a, (list, tuple)) and isinstance(b, (list, tuple))):
+        raise ValueError("dist3: arguments must be lists or tuples")
+    if len(a) != 3 or len(b) != 3:
+        raise ValueError("dist3: arguments must be 3D points")
+    return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
+
+def nearest_vertex_idx(pt, coords_list, tolerance=1e-4):
+    """Return index of closest point in coords_list to pt. Warn if no close vertex within tolerance."""
+    min_dist = float('inf')
+    min_idx = None
+    for i, v in enumerate(coords_list):
+        try:
+            d = dist3(pt, v)
+            if d < min_dist:
+                min_dist = d
+                min_idx = i
+        except Exception as e:
+            print("[ERROR] Bad vertex at index {}: {} | {}".format(i, v, e))
+    if min_idx is None:
+        raise RuntimeError("No valid vertex found for point {}".format(pt))
+    if min_dist > tolerance:
+        print("[WARN] Closest vertex to {} is at distance {:.6f} (idx {})".format(pt, min_dist, min_idx))
+    return min_idx
+
+def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(script_dir, "topologic.JSON")
+    results_path = os.path.join(script_dir, "topologic_results.json")
+    print("[DEBUG] Script started")
+    print(f"[DEBUG] Loading JSON from: {json_path}")
+
+    # Load input JSON
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+    vertices_json = data.get("vertices", [])
+    edges_json = data.get("edges", [])
+    start_points_data = data.get("start_points", [])
+    end_point = data.get("end_point", None)
+    print(f"[DEBUG] Input vertices: {len(vertices_json)}")
+    print(f"[DEBUG] Input edges: {len(edges_json)}")
+    print(f"[DEBUG] Start points: {len(start_points_data)}")
+    print(f"[DEBUG] End point: {end_point}")
+
+    # Filter for valid 3D vertices
+    valid_vertices = []
+    idx_map = {}
+    for i, v in enumerate(vertices_json):
+        if isinstance(v, list) and len(v) == 3 and all(isinstance(x, (int, float)) for x in v):
+            idx_map[i] = len(valid_vertices)
+            valid_vertices.append(v)
+        else:
+            print(f"[ERROR] Invalid vertex at index {i}: {v}")
+
+    if len(valid_vertices) != len(vertices_json):
+        print(f"[WARN] Filtered vertices: {len(valid_vertices)}/{len(vertices_json)} valid 3D points.")
+
+    # Adjust edges to new indices
+    remapped_edges = []
+    for a, b in edges_json:
+        if a in idx_map and b in idx_map:
+            remapped_edges.append([idx_map[a], idx_map[b]])
+        else:
+            print(f"[ERROR] Dropping edge [{a}, {b}] due to invalid vertex reference.")
+
+    # 1. Create Topologic Vertex and Edge objects
+    vertices = [Vertex.ByCoordinates(*v) for v in valid_vertices]
+    edges = []
+    for i, (a, b) in enumerate(remapped_edges):
+        try:
+            edges.append(Edge.ByVertices(vertices[a], vertices[b]))
+        except Exception as e:
+            print(f"[ERROR] Error creating edge {i} (from {a} to {b}): {e}")
+
+    print(f"[DEBUG] Created {len(vertices)} Topologic vertices, {len(edges)} Topologic edges.")
+
+    # 2. Create a Cluster from Edges
+    cluster = Cluster.ByTopologies(*edges)
+    print("[DEBUG] Cluster created.")
+
+    # 3. Self-merge the Cluster to a logical topology
+    logical_topology = Topology.SelfMerge(cluster)
+    print("[DEBUG] Self-merged topology created.")
+
+    # 4. Create a Graph from the logical topology
+    graph = Graph.ByTopology(logical_topology)
+    print("[DEBUG] Topologic graph object created.")
+
+    # 5. Get the list of graph vertices and their coordinates
+    graph_vertices = Graph.Vertices(graph)
+    graph_coords = [v.Coordinates() for v in graph_vertices]
+    print(f"[DEBUG] Graph vertex count: {len(graph_vertices)}")
+
+    if not graph_vertices:
+        print("[ERROR] No vertices in Topologic graph! Exiting.")
+        sys.exit(1)
+
+    # 6. Map end point
+    if end_point is not None and isinstance(end_point, list) and len(end_point) == 3:
+        end_idx = nearest_vertex_idx(end_point, graph_coords)
+        end_vertex = graph_vertices[end_idx]
+        print(f"[DEBUG] End point maps to graph vertex index: {end_idx} coords: {graph_coords[end_idx]}")
+    else:
+        print("[ERROR] No valid end_point defined in JSON. Exiting.")
+        sys.exit(1)
+
+    # 7. Map all start points (with element_id)
+    start_graph_vertices = []
+    element_ids = []
+    for i, spdict in enumerate(start_points_data):
+        sp = spdict["point"]
+        eid = spdict["element_id"]
+        if not (isinstance(sp, list) and len(sp) == 3):
+            print(f"[ERROR] Start point {i} of ElementId {eid} is not a valid 3D point: {sp}")
+            continue
+        try:
+            idx = nearest_vertex_idx(sp, graph_coords)
+            start_graph_vertices.append(graph_vertices[idx])
+            element_ids.append(eid)
+            print(f"[DEBUG] Start point {i} (ElementId {eid}) maps to graph vertex index: {idx} coords: {graph_coords[idx]}")
+        except Exception as e:
+            print(f"[ERROR] Failed to map start point {i} (ElementId {eid}): {e}")
+
+    # 8. Compute shortest path for each start point to end point
+    results = []
+    for i, v_start in enumerate(start_graph_vertices):
+        eid = element_ids[i]
+        try:
+            path_wire = Graph.ShortestPath(graph, v_start, end_vertex)
+            if path_wire:
+                path_vertices = Wire.Vertices(path_wire)
+                path_xyz = [v.Coordinates() for v in path_vertices]
+                length = sum(dist3(path_xyz[j], path_xyz[j+1]) for j in range(len(path_xyz)-1))
+                print(f"[DEBUG] Shortest path for start {i} (ElementId {eid}): length={length:.3f}, vertex_count={len(path_xyz)}")
+                results.append({
+                    "start_index": i,
+                    "element_id": eid,
+                    "length": length,
+                    "vertex_path_xyz": path_xyz
+                })
+            else:
+                print(f"[WARN] No path found for start {i} (ElementId {eid}).")
+                results.append({
+                    "start_index": i,
+                    "element_id": eid,
+                    "length": None,
+                    "vertex_path_xyz": []
+                })
+        except Exception as e:
+            print(f"[ERROR] Error computing shortest path for start {i} (ElementId {eid}): {e}")
+            results.append({
+                "start_index": i,
+                "element_id": eid,
+                "length": None,
+                "vertex_path_xyz": []
+            })
+
+    # 9. Write results with element_id
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"[DEBUG] Results written to: {results_path}")
+
+if __name__ == "__main__":
+    main()

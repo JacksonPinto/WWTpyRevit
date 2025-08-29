@@ -1,0 +1,148 @@
+
+=== calc_shortest.py | 2025-08-28 14:15:45 ===
+STATUS: External OK rc=0
+--- STDOUT ---
+[CALC] Vertices:259 Edges:212 StartPoints:50 EndPoint:[-24.92229461134604, 29.45119062832499, 5.413385826771782]
+[CALC] Clusters: 1
+[CALC] Base graph vertex count: 257
+[CALC] After inserting / projecting: vertices:259 edges:212
+[CALC] Final graph vertex count: 257
+Wire.ByVertices - Warning: The wire is made of only one edge.
+Wire.ByVertices - Warning: The wire is made of only one edge.
+[CALC] Results written: C:\Users\JacksonAugusto\Documents\GitHub\WWTpyRevit\WWT Tools.extension\WWT Tools.tab\Work Set.panel\Cable Length Calculation.pushbutton\topologic_results.json
+[CALC] Summary: 50 success / 50 total in 1.92s
+
+
+=== calc_shortest.py | 2025-08-28 14:48:15 ===
+STATUS: External OK rc=0
+--- STDOUT ---
+[CALC] Vertices:216 TotalEdges:215 InfraEdges:115 DeviceEdges:100 StartPoints:50
+[CALC] Graph vertices: 213 (post-merge)
+[CALC] WARN end point mapping distance 2.435737 > tolerance
+[CALC] End maps to idx 180 dist 2.435737
+[CALC] WARN start element 122379883 mapping distance 0.016404
+[CALC] WARN start element 122403679 mapping distance 0.295276
+[CALC] WARN start element 122403870 mapping distance 0.295276
+[CALC] WARN start element 122404377 mapping distance 0.295276
+[CALC] WARN start element 122404378 mapping distance 0.295276
+[CALC] WARN start element 122404395 mapping distance 0.295276
+[CALC] WARN start element 122405596 mapping distance 0.290354
+[CALC] WARN start element 122405719 mapping distance 0.290354
+[CALC] WARN start element 122405821 mapping distance 0.290354
+[CALC] WARN start element 122406090 mapping distance 0.290354
+[CALC] WARN start element 122406092 mapping distance 0.290354
+[CALC] WARN start element 122406093 mapping distance 0.290354
+[CALC] WARN start element 122406103 mapping distance 0.290354
+[CALC] WARN start element 122406104 mapping distance 0.290354
+[CALC] WARN start element 122406105 mapping distance 0.290354
+[CALC] WARN start element 122408928 mapping distance 0.295276
+[CALC] WARN start element 122409016 mapping distance 0.295276
+[CALC] WARN start element 122409188 mapping distance 0.295276
+[CALC] WARN start element 122409386 mapping distance 0.295276
+[CALC] WARN start element 122409530 mapping distance 0.295276
+[CALC] WARN start element 122409599 mapping distance 0.295276
+[CALC] WARN start element 122409601 mapping distance 0.295276
+[CALC] WARN start element 122409611 mapping distance 0.295276
+[CALC] WARN start element 122409612 mapping distance 0.295276
+[CALC] WARN start element 122426784 mapping distance 0.684724
+[CALC] WARN start element 122428793 mapping distance 2.321194
+[CALC] WARN start element 122428989 mapping distance 2.321194
+[CALC] WARN start element 122429657 mapping distance 2.591864
+[CALC] WARN start element 122430316 mapping distance 2.321194
+[CALC] WARN start element 122432824 mapping distance 2.591864
+[CALC] WARN start element 123155286 mapping distance 0.295276
+[CALC] WARN start element 123156630 mapping distance 0.295276
+[CALC] WARN start element 123157644 mapping distance 0.295276
+[CALC] WARN start element 123161047 mapping distance 2.321194
+[CALC] WARN start element 123919502 mapping distance 1.897966
+[CALC] WARN start element 123925160 mapping distance 2.427821
+[CALC] WARN start element 123926918 mapping distance 2.414698
+[CALC] WARN start element 123936318 mapping distance 2.919948
+[CALC] WARN start element 123966121 mapping distance 2.427821
+[CALC] WARN start element 123970330 mapping distance 1.993110
+[CALC] WARN start element 123973560 mapping distance 3.059383
+[CALC] WARN start element 123982528 mapping distance 1.982325
+[CALC] WARN start element 124000464 mapping distance 1.779569
+[CALC] WARN start element 124002613 mapping distance 2.263780
+[CALC] WARN start element 124855983 mapping distance 0.290354
+[CALC] WARN start element 124862091 mapping distance 2.919948
+[CALC] WARN start element 125209029 mapping distance 1.779569
+[CALC] WARN start element 125239789 mapping distance 2.306940
+[CALC] WARN start element 125241583 mapping distance 1.779569
+[CALC] WARN start element 125262664 mapping distance 0.656168
+[CALC] Mapped starts: 50
+[CALC] Results written: C:\Users\JacksonAugusto\Documents\GitHub\WWTpyRevit\WWT Tools.extension\WWT Tools.tab\Work Set.panel\Cable Length Calculation.pushbutton\topologic_results.json
+[CALC] Summary: 50 success / 50 total
+
+
+=== calc_shortest.py | 2025-08-28 15:19:49 ===
+STATUS: External OK rc=0
+--- STDOUT ---
+[CALC] Vertices:173 InfraEdges:131 DeviceEdges:41 TotalEdges:172 Starts:25
+[CALC] Graph vertices: 171
+[CALC] WARN end mapping distance 2.435737
+[CALC] WARN start 123283404 mapping distance 0.883963
+[CALC] WARN start 123288270 mapping distance 1.385572
+[CALC] WARN start 123289659 mapping distance 1.881456
+[CALC] WARN start 124944699 mapping distance 1.804462
+[CALC] WARN start 124944700 mapping distance 1.804462
+[CALC] WARN start 124957229 mapping distance 0.188648
+[CALC] WARN start 124957230 mapping distance 2.919948
+[CALC] WARN start 124957761 mapping distance 0.188648
+[CALC] WARN start 124957762 mapping distance 1.804462
+[CALC] WARN start 124958069 mapping distance 0.188648
+[CALC] WARN start 124958070 mapping distance 2.919948
+[CALC] WARN start 124958386 mapping distance 0.188648
+[CALC] WARN start 124958387 mapping distance 1.804462
+[CALC] WARN start 124958814 mapping distance 0.188648
+[CALC] WARN start 124958815 mapping distance 1.804462
+[CALC] WARN start 124959245 mapping distance 0.188648
+[CALC] WARN start 124959246 mapping distance 1.804462
+[CALC] WARN start 124959537 mapping distance 0.188648
+[CALC] WARN start 124959538 mapping distance 1.804462
+[CALC] WARN start 124959666 mapping distance 1.804462
+[CALC] WARN start 124959667 mapping distance 1.804462
+[CALC] WARN start 124959866 mapping distance 0.188648
+[CALC] WARN start 124959867 mapping distance 1.804462
+[CALC] WARN start 124960022 mapping distance 0.188648
+[CALC] WARN start 124960023 mapping distance 1.804462
+[CALC] Mapped starts: 25
+[CALC] Results written: C:\Users\JacksonAugusto\Documents\GitHub\WWTpyRevit\WWT Tools.extension\WWT Tools.tab\Work Set.panel\Cable Length Calculation.pushbutton\topologic_results.json
+[CALC] Summary: 19 success / 25 total
+
+
+=== calc_shortest.py | 2025-08-28 15:22:40 ===
+STATUS: External OK rc=0
+--- STDOUT ---
+[CALC] Vertices:173 InfraEdges:131 DeviceEdges:41 TotalEdges:172 Starts:25
+[CALC] Graph vertices: 171
+[CALC] WARN end mapping distance 2.435737
+[CALC] WARN start 123283404 mapping distance 0.883963
+[CALC] WARN start 123288270 mapping distance 1.385572
+[CALC] WARN start 123289659 mapping distance 1.881456
+[CALC] WARN start 124944699 mapping distance 1.804462
+[CALC] WARN start 124944700 mapping distance 1.804462
+[CALC] WARN start 124957229 mapping distance 0.188648
+[CALC] WARN start 124957230 mapping distance 2.919948
+[CALC] WARN start 124957761 mapping distance 0.188648
+[CALC] WARN start 124957762 mapping distance 1.804462
+[CALC] WARN start 124958069 mapping distance 0.188648
+[CALC] WARN start 124958070 mapping distance 2.919948
+[CALC] WARN start 124958386 mapping distance 0.188648
+[CALC] WARN start 124958387 mapping distance 1.804462
+[CALC] WARN start 124958814 mapping distance 0.188648
+[CALC] WARN start 124958815 mapping distance 1.804462
+[CALC] WARN start 124959245 mapping distance 0.188648
+[CALC] WARN start 124959246 mapping distance 1.804462
+[CALC] WARN start 124959537 mapping distance 0.188648
+[CALC] WARN start 124959538 mapping distance 1.804462
+[CALC] WARN start 124959666 mapping distance 1.804462
+[CALC] WARN start 124959667 mapping distance 1.804462
+[CALC] WARN start 124959866 mapping distance 0.188648
+[CALC] WARN start 124959867 mapping distance 1.804462
+[CALC] WARN start 124960022 mapping distance 0.188648
+[CALC] WARN start 124960023 mapping distance 1.804462
+[CALC] Mapped starts: 25
+[CALC] Results written: C:\Users\JacksonAugusto\Documents\GitHub\WWTpyRevit\WWT Tools.extension\WWT Tools.tab\Work Set.panel\Cable Length Calculation.pushbutton\topologic_results.json
+[CALC] Summary: 19 success / 25 total
+

@@ -1,0 +1,339 @@
+{
+  "meta": {
+    "script_version": "1.0.1",
+    "engine": "topologic",
+    "recomputed": false,
+    "used_existing_results": true,
+    "vertex_count": 256,
+    "edge_count": 201,
+    "unique_edge_count": 201,
+    "total_network_edge_length": 774.2549429471986,
+    "start_count": 50,
+    "paths_success": 0,
+    "paths_failed": 50,
+    "total_used_shortest_paths_length": null,
+    "min_path_length": null,
+    "max_path_length": null,
+    "avg_path_length": null,
+    "match_tolerance": 1e-09,
+    "bridging": {
+      "starts_enabled": true,
+      "end_enabled": true,
+      "max_distance": 5.0
+    },
+    "config": {
+      "recompute_shortest": false,
+      "ignore_duplicate_edges": true,
+      "edge_key": "Length"
+    },
+    "runtime_seconds": 0.002,
+    "source_files": {
+      "network": "topologic.JSON",
+      "shortest_results": "topologic_results.json"
+    },
+    "input_meta": {}
+  },
+  "results_count": 50,
+  "path_results": [
+    {
+      "start_index": 0,
+      "element_id": 122379883,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 1,
+      "element_id": 122403679,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 2,
+      "element_id": 122403870,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 3,
+      "element_id": 122404377,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 4,
+      "element_id": 122404378,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 5,
+      "element_id": 122404395,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 6,
+      "element_id": 122405596,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 7,
+      "element_id": 122405719,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 8,
+      "element_id": 122405821,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 9,
+      "element_id": 122406090,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 10,
+      "element_id": 122406092,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 11,
+      "element_id": 122406093,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 12,
+      "element_id": 122406103,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 13,
+      "element_id": 122406104,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 14,
+      "element_id": 122406105,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 15,
+      "element_id": 122408928,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 16,
+      "element_id": 122409016,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 17,
+      "element_id": 122409188,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 18,
+      "element_id": 122409386,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 19,
+      "element_id": 122409530,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 20,
+      "element_id": 122409599,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 21,
+      "element_id": 122409601,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 22,
+      "element_id": 122409611,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 23,
+      "element_id": 122409612,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 24,
+      "element_id": 122426784,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 25,
+      "element_id": 122428793,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 26,
+      "element_id": 122428989,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 27,
+      "element_id": 122429657,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 28,
+      "element_id": 122430316,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 29,
+      "element_id": 122432824,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 30,
+      "element_id": 123155286,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 31,
+      "element_id": 123156630,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 32,
+      "element_id": 123157644,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 33,
+      "element_id": 123161047,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 34,
+      "element_id": 123919502,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 35,
+      "element_id": 123925160,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 36,
+      "element_id": 123926918,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 37,
+      "element_id": 123936318,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 38,
+      "element_id": 123966121,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 39,
+      "element_id": 123970330,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 40,
+      "element_id": 123973560,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 41,
+      "element_id": 123982528,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 42,
+      "element_id": 124000464,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 43,
+      "element_id": 124002613,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 44,
+      "element_id": 124855983,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 45,
+      "element_id": 124862091,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 46,
+      "element_id": 125209029,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 47,
+      "element_id": 125239789,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 48,
+      "element_id": 125241583,
+      "length": null,
+      "status": "no_path"
+    },
+    {
+      "start_index": 49,
+      "element_id": 125262664,
+      "length": null,
+      "status": "no_path"
+    }
+  ]
+}

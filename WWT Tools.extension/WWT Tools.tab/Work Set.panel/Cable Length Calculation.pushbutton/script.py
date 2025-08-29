@@ -1,654 +1,568 @@
 # -*- coding: utf-8 -*-
-# run_script.py  (ALT experimental run-based implementation)
-# Version: 0.1.0 (2025-08-27)
-# Author: JacksonPinto
+# Export Infrastructure + Projected L Jumpers (Edge Splitting)
+# Version: 2.7.0 (IronPython)
 #
-# PURPOSE:
-#   Alternative test script that builds infrastructure network primarily from
-#   CableTrayRun / ConduitRun (CableTrayConduitRunBase descendants) instead of
-#   stitching every tray + fitting manually. Falls back to legacy element-by-element
-#   extraction for:
-#       - Residual trays / conduits not part of any accepted run
-#       - Fittings (tray or conduit) if user chooses to include residual elements
+# Features:
+#   * Builds infrastructure edges (tray/conduit) with curve subdivision (optional).
+#   * For each device start point:
+#       - Finds nearest infrastructure segment (edge).
+#       - Projects device XY(Z) onto that segment.
+#       - If projection falls in the middle of an edge (not near endpoints) splits the edge:
+#             (a,b) -> (a,p) + (p,b) inserting new projection vertex p.
+#       - Creates L connection:
+#             device -> vertical point (same XY as device, Z=projection Z) [optional]
+#             vertical point -> projection vertex [optional horizontal]
+#         Controlled by CREATE_VERTICAL_SEGMENT / CREATE_HORIZONTAL_SEGMENT.
+#   * Writes:
+#       vertices
+#       infra_edges
+#       device_edges
+#       edges (combined, deduped)
+#       start_points
+#       end_point
+#   * Calls calc_shortest.py then update_cable_lengths.py
 #
-# WORKFLOW (similar to main script):
-#   1. User selects infrastructure categories (still offer trays/fittings/conduits/fittings).
-#   2. Script gathers run objects (CableTrayRun, ConduitRun) if those categories imply tray/conduit use.
-#   3. For each run:
-#        * Collect its member element Ids (reflection for MemberIds / GetMemberIds).
-#        * Test Equipment Color filter against member elements (ANY match = run accepted).
-#        * Extract ordered path curves (reflection for GetCurves / GetPath*).
-#        * Sample curves (lines pass through directly; arcs & non-lines subdivided).
-#        * Add edges between successive sample points.
-#   4. Optionally include residual individual infrastructure elements (centerlines + fitting connectors).
-#   5. Create L-shaped jumper connections from each electrical device to nearest network segment.
-#   6. Export graph as topologic.JSON (meta included) & debug CSV.
-#   7. Invoke calc_shortest.py (Python 3) then update_cable_lengths.py.
+# IronPython safe (no f-strings).
 #
-# NOTES / LIMITATIONS:
-#   - Because Revit 2025 API method names can evolve, reflection attempts multiple
-#     method/property names for run path and member IDs.
-#   - If *no runs* found or *no runs pass filter*, fallback network may rely entirely
-#     on residual extraction (if enabled) otherwise direct (star) mode.
-#   - Arcs: Sampled with chord length max ARC_SEG_LEN_FT to preserve routed length.
-#   - Units: All coordinates & lengths are Revit internal feet (consistent with other scripts).
-#
-# COMPATIBILITY:
-#   - calc_shortest.py and update_cable_lengths.py previously supplied remain compatible.
-#
-# ------------------------------------------------------------------------------
-
 from Autodesk.Revit.DB import (
-    FilteredElementCollector,
-    BuiltInCategory,
-    UV,
-    XYZ
+    FilteredElementCollector, BuiltInCategory, UV,
+    FamilyInstance, LocationCurve
 )
 from Autodesk.Revit.UI.Selection import ObjectType
 from pyrevit import forms
-import math, json, os, subprocess, traceback
+import os, json, math, traceback, datetime
 
-doc = __revit__.ActiveUIDocument.Document
+# ---------------- CONFIG ----------------
+SHOW_SCRIPT_PATH = False
+
+USE_INFRA_CATEGORY_DIALOG  = True
+USE_DEVICE_CATEGORY_DIALOG = True
+ASK_DEVICE_SELECTION_MODE  = True
+DEFAULT_DEVICE_SELECTION_MODE = "all"
+
+# Geometry sampling & tolerances
+SUBDIVIDE_ARCS = True
+CURVE_SEG_LENGTH_FT = 2.0
+MERGE_TOL = 5e-4               # Vertex merge tolerance
+PROJECTION_ENDPOINT_TOL = 1e-3 # If projection this close to endpoint, reuse endpoint
+ROUND_PREC = 6
+
+# Fittings
+FITTING_CONNECTOR_TO_POINT = True
+INCLUDE_FITTING_WITHOUT_CONNECTORS = True
+
+# L jumper segment creation
+CREATE_VERTICAL_SEGMENT = True
+CREATE_HORIZONTAL_SEGMENT = True  # horizontal from vertical point to projection. If False device connects directly (vertical only)
+VERTICAL_MIN_LEN = 1e-6           # treat near zero vertical difference as zero
+
+# External processing
+PYTHON3_PATH = r"C:\Users\JacksonAugusto\AppData\Local\Programs\Python\Python312\python.exe"
+RUN_CALC_SHORTEST = True
+CALC_SCRIPT_NAME  = "calc_shortest.py"
+CALC_ARGS         = []
+FORCE_INTERNAL_CALC   = False
+
+RUN_UPDATE_LENGTHS = True
+UPDATE_SCRIPT_NAME = "update_cable_lengths.py"
+UPDATE_ARGS        = []
+FORCE_INTERNAL_UPDATE = True      # Revit API => internal exec
+
+FALLBACK_INTERNAL_IF_EXTERNAL_FAILS = True
+OPEN_FOLDER_AFTER = False
+
+# Debug / console
+PRINT_TO_CONSOLE = True
+DEBUG_PROJECTION = False
+DEBUG_DEVICE     = False
+
+# ----------------------------------------
 uidoc = __revit__.ActiveUIDocument
+doc   = uidoc.Document
+active_view = uidoc.ActiveView
+if not doc or not active_view:
+    forms.alert("Need active document + active view.", exitscript=True)
 
-# ------------------------------ CONFIG ---------------------------------
-ARC_SEG_LEN_FT = 2.0      # Max chord length when discretizing arcs / splines (feet)
-MERGE_TOL = 1e-5          # Vertex merge tolerance (feet)
-# -----------------------------------------------------------------------
+def cprint(*args):
+    if PRINT_TO_CONSOLE:
+        try:
+            print("[EXPORT]", " ".join([str(a) for a in args]))
+        except:
+            pass
 
-# --------------------------- BASIC UTILITIES ---------------------------
-def get_catid(el):
+def to_int_id(obj):
     try:
-        return el.Category.Id.IntegerValue
+        if hasattr(obj,'Id'):
+            return int(str(obj.Id))
+        if hasattr(obj,'IntegerValue'):
+            return obj.IntegerValue
+        return int(obj)
     except:
-        try:
-            return int(el.Category.Id)
-        except:
-            return None
+        return None
 
-def get_param_value(el, pname):
-    p = el.LookupParameter(pname)
-    if p:
-        try:
-            return p.AsString()
-        except:
-            return None
-    return None
+def dist3(a,b):
+    return math.sqrt((a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2)
 
-def distance3d(a,b):
-    return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
-
-def isclose(a,b,t=1e-9):
-    return abs(a-b)<=t
-
-def closest_point_on_line(pt, seg):
-    ax,ay,az = seg[0]; bx,by,bz=seg[1]; px,py,pz=pt
-    ab=(bx-ax,by-ay,bz-az); ap=(px-ax,py-ay,pz-az)
-    ab2=ab[0]**2+ab[1]**2+ab[2]**2
-    if ab2==0:
-        return (seg[0], distance3d(pt, seg[0]), 0.0)
-    t=(ap[0]*ab[0]+ap[1]*ab[1]+ap[2]*ab[2])/ab2
-    t=max(0.0,min(1.0,t))
-    cx=ax+ab[0]*t; cy=ay+ab[1]*t; cz=az+ab[2]*t
-    cpt=(cx,cy,cz)
-    return (cpt, distance3d(pt,cpt), t)
-
-def conduit_or_tray_centerline(el):
-    try:
-        loc=el.Location
-        if hasattr(loc,"Curve") and loc.Curve:
-            c=loc.Curve
-            sp=c.GetEndPoint(0); ep=c.GetEndPoint(1)
-            return [(sp.X,sp.Y,sp.Z),(ep.X,ep.Y,ep.Z)]
-    except: pass
-    return None
-
-def fitting_connectors(el):
+def sample_curve(curve):
     pts=[]
+    try:
+        sp=curve.GetEndPoint(0); ep=curve.GetEndPoint(1)
+        length=curve.Length
+        name=curve.GetType().Name.lower()
+        if (("line" in name) and ("arc" not in name)) or not SUBDIVIDE_ARCS:
+            return [(sp.X,sp.Y,sp.Z),(ep.X,ep.Y,ep.Z)]
+        segs=max(2,int(math.ceil(length/CURVE_SEG_LENGTH_FT)))
+        i=0
+        while i<=segs:
+            p=curve.Evaluate(float(i)/segs,True)
+            pts.append((p.X,p.Y,p.Z))
+            i+=1
+        return pts
+    except:
+        return pts
+
+def norm_key(p):
+    return (round(p[0],ROUND_PREC),round(p[1],ROUND_PREC),round(p[2],ROUND_PREC))
+
+def get_all_connectors(el):
+    pts=[]; seen=set()
+    def add(xyz):
+        t=(xyz.X,xyz.Y,xyz.Z)
+        if t not in seen:
+            seen.add(t); pts.append(t)
     try:
         mep=getattr(el,'MEPModel',None)
         if mep:
             cm=getattr(mep,'ConnectorManager',None)
-            if cm and cm.Connectors:
-                for conn in cm.Connectors:
-                    o=conn.Origin
-                    pts.append((o.X,o.Y,o.Z))
+            if cm and getattr(cm,'Connectors',None):
+                for c in cm.Connectors: add(c.Origin)
     except: pass
     try:
         cm2=getattr(el,'ConnectorManager',None)
-        if cm2 and cm2.Connectors:
-            for conn in cm2.Connectors:
-                o=conn.Origin
-                p=(o.X,o.Y,o.Z)
-                if p not in pts:
-                    pts.append(p)
+        if cm2 and getattr(cm2,'Connectors',None):
+            for c in cm2.Connectors: add(c.Origin)
     except: pass
     return pts
 
-def fitting_edges_from_connectors(points):
-    edges=[]
-    n=len(points)
-    if n==2:
-        edges.append((points[0],points[1]))
-    elif n==3:
-        edges += [(points[0],points[1]),(points[1],points[2]),(points[2],points[0])]
-    elif n==4:
-        edges += [(points[0],points[2]),(points[1],points[3])]
-    else:
-        for i in range(n-1):
-            edges.append((points[i],points[i+1]))
-    return edges
-
-def face_center_from_reference(ref):
-    el=doc.GetElement(ref.ElementId)
-    geom=el.GetGeometryObjectFromReference(ref)
-    if not hasattr(geom, "Evaluate"):
-        return None, el
-    bbox=geom.GetBoundingBox()
-    cuv=UV((bbox.Min.U+bbox.Max.U)/2.0, (bbox.Min.V+bbox.Max.V)/2.0)
-    xyz=geom.Evaluate(cuv)
-    return (xyz.X,xyz.Y,xyz.Z), el
-
-def get_electrical_categories():
-    ids=[
-        BuiltInCategory.OST_ElectricalFixtures,
-        BuiltInCategory.OST_ElectricalEquipment,
-        BuiltInCategory.OST_LightingFixtures,
-        BuiltInCategory.OST_DataDevices,
-        BuiltInCategory.OST_LightingDevices,
-        BuiltInCategory.OST_CommunicationDevices,
-        BuiltInCategory.OST_FireAlarmDevices,
-        BuiltInCategory.OST_SecurityDevices,
-        BuiltInCategory.OST_NurseCallDevices,
-        BuiltInCategory.OST_TelephoneDevices
-    ]
-    out=[]
-    for cid in ids:
-        cat=doc.Settings.Categories.get_Item(cid)
-        if cat: out.append((cat.Name,cid))
-    return out
-
-# --------------------- USER INPUT ---------------------
-def ask_initial():
-    infra_opts=[
-        ("Cable Trays", BuiltInCategory.OST_CableTray),
-        ("Cable Tray Fittings", BuiltInCategory.OST_CableTrayFitting),
-        ("Conduits", BuiltInCategory.OST_Conduit),
-        ("Conduit Fittings", BuiltInCategory.OST_ConduitFitting),
-    ]
-    names=[n for n,_ in infra_opts]
-    infra_sel=forms.SelectFromList.show(names, title="Select Infrastructure Categories", multiselect=True)
-    if not infra_sel: forms.alert("No infrastructure categories selected.", exitscript=True)
-    infra_cats=[cid for n,cid in infra_opts if n in infra_sel]
-
-    ecs=get_electrical_categories()
-    if not ecs: forms.alert("No electrical categories found.", exitscript=True)
-    enames=[n for n,_ in ecs]
-    elec_sel=forms.SelectFromList.show(enames, title="Select Electrical Device Categories", multiselect=True)
-    if not elec_sel: forms.alert("No electrical categories selected.", exitscript=True)
-    elec_ids=[cid for n,cid in ecs if n in elec_sel]
-
-    mode=forms.SelectFromList.show(["Manual Select (Pick Devices)","All Devices in Active View"],
-                                   multiselect=False,
-                                   title="Electrical Element Selection Mode")
-    if not mode: forms.alert("No mode selected.", exitscript=True)
-    mode = "manual" if "Manual" in mode else "all"
-
-    include_residual=forms.alert(
-        "Include RESIDUAL individual elements (centerlines + fitting connectors)\nNOT part of accepted runs?",
-        options=["Yes","No"])
-    residual = (include_residual=="Yes")
-
-    return infra_cats, elec_ids, elec_sel, mode, residual
-
-infra_cats, elec_cat_ids, elec_selected_names, select_mode, include_residual = ask_initial()
-
-color_filter=forms.ask_for_string(
-    prompt="Equipment Color filter (blank=skip). Run accepted if ANY member element matches.",
-    default="Blue",
-    title="Color Filter"
-)
-if color_filter is None:
-    forms.alert("Cancelled.", exitscript=True)
-color_filter_norm=color_filter.strip().lower()
-use_color = (color_filter_norm!="")
-
-# -------------------- RUN COLLECTION --------------------
-# We attempt to import run classes; if not present (old Revit) we gracefully fallback.
-try:
-    from Autodesk.Revit.DB import CableTrayRun, ConduitRun
-    RUN_SUPPORT = True
-except Exception:
-    RUN_SUPPORT = False
-
-run_edges=[]          # edges extracted from runs
-run_curve_samples=0
-run_arcs_sampled=0
-accepted_run_ids=[]
-skipped_run_color=0
-skipped_run_empty=0
-run_member_color_cache={}
-run_member_counts=[]
-run_errors=[]
-
-def get_member_ids(run):
-    # Try multiple options
-    for attr in ("MemberIds","GetMemberIds","ElementIds","GetElementIds"):
-        try:
-            val=getattr(run, attr)
-            if callable(val):
-                res=val()
-            else:
-                res=val
-            # Convert to list of ElementId
-            try:
-                return list(res)
-            except:
-                pass
-        except:
-            continue
-    return []
-
-def get_run_curves(run):
-    # Attempt typical method names
-    candidates=["GetCurves","GetPathCurves","GetPath","Curves","Path"]
-    for name in candidates:
-        try:
-            attr=getattr(run,name)
-            curves=attr() if callable(attr) else attr
-            # Expect iterable of Curve
-            return list(curves)
-        except:
-            continue
-    return []
-
-def sample_curve(curve):
-    """Return list of XYZ triplets along curve (including endpoints). Lines -> 2 pts; arcs/splines segmented."""
-    global run_arcs_sampled
-    pts=[]
+def get_fitting_location_point(el):
+    loc=getattr(el,"Location",None)
+    if loc and hasattr(loc,"Point") and getattr(loc,"Point",None):
+        p=loc.Point
+        return (p.X,p.Y,p.Z),"LocationPoint"
     try:
-        # Try to detect line quickly
-        if curve.GetEndPoint(0) and curve.GetEndPoint(1):
-            sp=curve.GetEndPoint(0)
-            ep=curve.GetEndPoint(1)
-        else:
-            return pts
-        length=curve.Length
-        # If curve is a straight line:
-        curveClass=curve.GetType().Name.lower()
-        if "line" in curveClass and "arc" not in curveClass:
-            pts.append((sp.X,sp.Y,sp.Z))
-            pts.append((ep.X,ep.Y,ep.Z))
-            return pts
-        # Non-line: segment based on length
-        run_arcs_sampled += 1
-        seg_count = max(2, int(math.ceil(length / ARC_SEG_LEN_FT)))
-        for i in range(seg_count+1):
-            p=curve.Evaluate((1.0/seg_count)*i, True)
-            pts.append((p.X,p.Y,p.Z))
-        return pts
-    except:
-        # fallback just endpoints
-        pts.append((sp.X,sp.Y,sp.Z))
-        pts.append((ep.X,ep.Y,ep.Z))
-        return pts
+        if isinstance(el,FamilyInstance):
+            tr=el.GetTransform()
+            if tr:
+                o=tr.Origin
+                return (o.X,o.Y,o.Z),"TransformOrigin"
+    except: pass
+    return None,"None"
 
-if RUN_SUPPORT:
-    # Collect runs only if Tray or Conduit categories are selected
-    want_tray = any(c in infra_cats for c in [BuiltInCategory.OST_CableTray])
-    want_conduit = any(c in infra_cats for c in [BuiltInCategory.OST_Conduit])
-    if want_tray:
-        tray_runs = list(FilteredElementCollector(doc).OfClass(CableTrayRun))
-    else:
-        tray_runs = []
-    if want_conduit:
-        conduit_runs = list(FilteredElementCollector(doc).OfClass(ConduitRun))
-    else:
-        conduit_runs = []
-    all_runs = tray_runs + conduit_runs
+def project_point_to_segment(pt, a, b):
+    # Returns (projection_point, t_clamped, distance)
+    ax,ay,az = a; bx,by,bz = b; px,py,pz = pt
+    ab=(bx-ax, by-ay, bz-az); ap=(px-ax, py-ay, pz-az)
+    ab2=ab[0]*ab[0]+ab[1]*ab[1]+ab[2]*ab[2]
+    if ab2==0: return a, 0.0, dist3(pt,a)
+    t=(ap[0]*ab[0]+ap[1]*ab[1]+ap[2]*ab[2])/ab2
+    if t<0: t=0
+    elif t>1: t=1
+    cx=ax+ab[0]*t; cy=ay+ab[1]*t; cz=az+ab[2]*t
+    d=dist3(pt,(cx,cy,cz))
+    return (cx,cy,cz), t, d
 
-    for run in all_runs:
-        try:
-            member_ids = get_member_ids(run)
-            run_member_counts.append((int(run.Id.IntegerValue), len(member_ids)))
-            members=[doc.GetElement(mid) for mid in member_ids]
-            # Evaluate color
-            member_colors = set()
-            for m in members:
-                val=get_param_value(m,"Equipment Color")
-                if val: member_colors.add(val.strip().lower())
-            run_member_color_cache[int(run.Id.IntegerValue)] = list(member_colors)
-            if use_color:
-                if not any(c == color_filter_norm for c in member_colors):
-                    skipped_run_color += 1
-                    continue
-            # Extract curves
-            curves = get_run_curves(run)
-            if not curves:
-                skipped_run_empty += 1
-                continue
-            # Build edges
-            for cv in curves:
-                sample_pts = sample_curve(cv)
-                if len(sample_pts) < 2:
-                    continue
-                for i in range(len(sample_pts)-1):
-                    a=sample_pts[i]; b=sample_pts[i+1]
-                    if distance3d(a,b) > 1e-9:
-                        run_edges.append((a,b))
-                        run_curve_samples += 1
-            accepted_run_ids.append(int(run.Id.IntegerValue))
-        except Exception as e:
-            run_errors.append("Run {} error: {}".format(run.Id, e))
+# --- Category selection ---
+infra_category_map=[
+    ("Cable Trays", BuiltInCategory.OST_CableTray),
+    ("Cable Tray Fittings", BuiltInCategory.OST_CableTrayFitting),
+    ("Conduits", BuiltInCategory.OST_Conduit),
+    ("Conduit Fittings", BuiltInCategory.OST_ConduitFitting),
+]
+device_category_map=[
+    ("Electrical Fixtures", BuiltInCategory.OST_ElectricalFixtures),
+    ("Electrical Equipment", BuiltInCategory.OST_ElectricalEquipment),
+    ("Lighting Fixtures", BuiltInCategory.OST_LightingFixtures),
+    ("Data Devices", BuiltInCategory.OST_DataDevices),
+    ("Lighting Devices", BuiltInCategory.OST_LightingDevices),
+    ("Communication Devices", BuiltInCategory.OST_CommunicationDevices),
+    ("Fire Alarm Devices", BuiltInCategory.OST_FireAlarmDevices),
+    ("Security Devices", BuiltInCategory.OST_SecurityDevices),
+    ("Nurse Call Devices", BuiltInCategory.OST_NurseCallDevices),
+    ("Telephone Devices", BuiltInCategory.OST_TelephoneDevices),
+]
 
-# -------------------- RESIDUAL (LEGACY) EXTRACTION --------------------
-residual_edges=[]
-residual_fail=[]
-residual_counts={"Tray":0,"Tray_edges":0,"TrayFitting":0,"TrayFitting_edges":0,
-                 "Conduit":0,"Conduit_edges":0,"ConduitFitting":0,"ConduitFitting_edges":0}
-
-if include_residual:
-    # Collect explicit infra elements (Active View)
-    infra_elements=[]
-    for cat in infra_cats:
-        col=(FilteredElementCollector(doc, doc.ActiveView.Id)
-             .OfCategory(cat)
-             .WhereElementIsNotElementType())
-        for el in col: infra_elements.append(el)
-
-    # Remove elements already consumed by accepted runs (if we can detect membership)
-    accepted_member_ids=set()
-    if RUN_SUPPORT and accepted_run_ids:
-        # Flatten all member ids from accepted runs for filtering duplicates
-        for run in (tray_runs+conduit_runs):
-            if int(run.Id.IntegerValue) in accepted_run_ids:
-                mids=get_member_ids(run)
-                for mid in mids:
-                    accepted_member_ids.add(int(mid.IntegerValue))
-    filtered_residual=[]
-    for el in infra_elements:
-        if int(el.Id.IntegerValue) in accepted_member_ids:
-            continue
-        # color filter
-        if use_color:
-            val=get_param_value(el,"Equipment Color")
-            if not (val and val.strip().lower()==color_filter_norm):
-                continue
-        filtered_residual.append(el)
-
-    for el in filtered_residual:
-        cid=get_catid(el)
-        if cid==int(BuiltInCategory.OST_CableTray):
-            residual_counts["Tray"]+=1
-            cl=conduit_or_tray_centerline(el)
-            if cl:
-                residual_edges.append(tuple(cl))
-                residual_counts["Tray_edges"]+=1
-            else:
-                residual_fail.append((int(str(el.Id)),"Tray centerline missing"))
-        elif cid==int(BuiltInCategory.OST_CableTrayFitting):
-            residual_counts["TrayFitting"]+=1
-            pts=fitting_connectors(el)
-            if len(pts)>=2:
-                fes=fitting_edges_from_connectors(pts)
-                residual_counts["TrayFitting_edges"]+=len(fes)
-                residual_edges.extend(fes)
-            else:
-                residual_fail.append((int(str(el.Id)),"Tray fitting connectors<2"))
-        elif cid==int(BuiltInCategory.OST_Conduit):
-            residual_counts["Conduit"]+=1
-            cl=conduit_or_tray_centerline(el)
-            if cl:
-                residual_edges.append(tuple(cl))
-                residual_counts["Conduit_edges"]+=1
-            else:
-                residual_fail.append((int(str(el.Id)),"Conduit centerline missing"))
-        elif cid==int(BuiltInCategory.OST_ConduitFitting):
-            residual_counts["ConduitFitting"]+=1
-            pts=fitting_connectors(el)
-            if len(pts)>=2:
-                fes=fitting_edges_from_connectors(pts)
-                residual_counts["ConduitFitting_edges"]+=len(fes)
-                residual_edges.extend(fes)
-            else:
-                residual_fail.append((int(str(el.Id)),"Conduit fitting connectors<2"))
-
-# -------------------- CONSOLIDATE INFRA NETWORK --------------------
-infrastructure_edges = run_edges + residual_edges
-segments_for_nearest = list(infrastructure_edges)  # simple list of pair tuples
-
-# If infrastructure empty, we will create star connections later
-# -------------------- ELECTRICAL ELEMENTS --------------------
-if select_mode=="manual":
-    try:
-        refs=uidoc.Selection.PickObjects(ObjectType.Element,
-            "Pick electrical devices (categories: {})".format(", ".join(elec_selected_names)))
-        picked=[doc.GetElement(r.ElementId) for r in refs]
-        valid=set(elec_selected_names)
-        electrical=[el for el in picked if el.Category and el.Category.Name in valid]
-        if not electrical:
-            forms.alert("No picked elements match selected categories.", exitscript=True)
-    except Exception as e:
-        forms.alert("No elements picked.\n{}".format(e), exitscript=True)
+if USE_INFRA_CATEGORY_DIALOG:
+    infra_names=[n for n,_ in infra_category_map]
+    chosen=forms.SelectFromList.show(infra_names,title="Select Infrastructure Categories",multiselect=True)
+    if not chosen: forms.alert("No infrastructure categories.", exitscript=True)
+    infra_cats=[cid for n,cid in infra_category_map if n in chosen]
 else:
-    electrical=[]
-    for cid in elec_cat_ids:
-        electrical.extend(
-            FilteredElementCollector(doc, doc.ActiveView.Id)
-            .OfCategory(cid).WhereElementIsNotElementType().ToElements()
-        )
+    infra_cats=[cid for _,cid in infra_category_map]
 
-electrical=[el for el in electrical if hasattr(el,"Location") and hasattr(el.Location,"Point") and el.Location.Point]
-if not electrical:
-    forms.alert("No electrical point-location elements found.", exitscript=True)
+if USE_DEVICE_CATEGORY_DIALOG:
+    dev_names=[n for n,_ in device_category_map]
+    dchosen=forms.SelectFromList.show(dev_names,title="Select Device Categories",multiselect=True)
+    if not dchosen: forms.alert("No device categories.", exitscript=True)
+    device_cat_ids=[cid for n,cid in device_category_map if n in dchosen]
+else:
+    dchosen=[n for n,_ in device_category_map]
+    device_cat_ids=[cid for _,cid in device_category_map]
 
-# Optional scope box
-try:
-    scope_choice=forms.alert("Scope Box filter? (Select=Pick one / Skip)", options=["Select","Skip"])
-    if scope_choice=="Select":
-        sb_ref=uidoc.Selection.PickObject(ObjectType.Element,"Pick Scope Box")
-        sb_el=doc.GetElement(sb_ref.ElementId)
-        if get_catid(sb_el)==int(BuiltInCategory.OST_VolumeOfInterest):
-            bbox=sb_el.get_BoundingBox(None)
-            inside=[]
-            for e in electrical:
-                p=e.Location.Point
-                if (bbox.Min.X<=p.X<=bbox.Max.X and
-                    bbox.Min.Y<=p.Y<=bbox.Max.Y and
-                    bbox.Min.Z<=p.Z<=bbox.Max.Z):
-                    inside.append(e)
-            electrical=inside
-            if not electrical:
-                forms.alert("No electrical elements inside scope box.", exitscript=True)
-        else:
-            forms.alert("Not a scope box. Ignoring.")
-except:
-    pass
+if ASK_DEVICE_SELECTION_MODE:
+    mode=forms.SelectFromList.show(["Manual Pick Devices","All Devices In Active View"],
+                                   multiselect=False, title="Device Selection Mode")
+    if not mode: forms.alert("Device selection canceled.", exitscript=True)
+    selection_mode="manual" if mode.startswith("Manual") else "all"
+else:
+    selection_mode=DEFAULT_DEVICE_SELECTION_MODE
 
-# -------------------- PICK END FACE --------------------
-forms.alert("Select a FACE on infrastructure (tray/conduit/run member/fitting) for End Point.")
-try:
-    face_ref=uidoc.Selection.PickObject(ObjectType.Face,"Pick End Point Face")
-except Exception as e:
-    forms.alert("End Point face not selected.\n{}".format(e), exitscript=True)
+fitting_cat_set=set([BuiltInCategory.OST_CableTrayFitting, BuiltInCategory.OST_ConduitFitting])
+linear_cat_set =set([BuiltInCategory.OST_CableTray, BuiltInCategory.OST_Conduit])
 
-end_xyz, end_elem = face_center_from_reference(face_ref)
-if not end_xyz:
-    forms.alert("Failed to evaluate End Point.", exitscript=True)
+# --- Collect infrastructure ---
+fittings=[]; linears=[]
+from Autodesk.Revit.DB import LocationCurve
+for cat in infra_cats:
+    col=(FilteredElementCollector(doc, active_view.Id).OfCategory(cat).WhereElementIsNotElementType())
+    for el in col:
+        if cat in fitting_cat_set: fittings.append(el)
+        elif cat in linear_cat_set: linears.append(el)
 
-# Option to add end element geometry if not already present (residual mode)
-if include_residual and infrastructure_edges:
-    # If end element is a residual element not covered by runs and not extracted yet
-    if end_elem and end_elem.Category:
-        cid=get_catid(end_elem)
-        need_add = False
-        if cid in (int(BuiltInCategory.OST_CableTray), int(BuiltInCategory.OST_Conduit)):
-            cl = conduit_or_tray_centerline(end_elem)
-            if cl and (cl[0],cl[1]) not in infrastructure_edges:
-                need_add=True
-                infrastructure_edges.append(tuple(cl))
-                segments_for_nearest.append((cl[0],cl[1]))
-        elif cid in (int(BuiltInCategory.OST_CableTrayFitting), int(BuiltInCategory.OST_ConduitFitting)):
-            pts=fitting_connectors(end_elem)
-            if len(pts)>=2:
-                edges=fitting_edges_from_connectors(pts)
-                # Add only if not already present
-                new_added=False
-                for e in edges:
-                    if e not in infrastructure_edges:
-                        infrastructure_edges.append(e)
-                        segments_for_nearest.append(e)
-                        new_added=True
-                need_add=new_added
-        if need_add:
-            forms.alert("End element geometry appended to infrastructure network.")
-
-# -------------------- DEVICE CONNECTIONS (L-Jumpers) --------------------
+# We'll construct vertex + edge lists incrementally with splitting.
+vertices=[]            # list of [x,y,z]
+vertex_map={}          # norm_key -> index
+infra_edges=[]         # list of [i,j] (after splitting)
+fitting_points=[]
+device_edges=[]        # jumper edges (added after projection splitting)
 start_points=[]
-connection_edges=[]
-csv_rows=[]
-direct_mode = (len(segments_for_nearest)==0)
 
-def add_csv(eid, typ, a, b):
-    csv_rows.append((eid,typ,a,b,distance3d(a,b)))
-
-for el in electrical:
-    p=el.Location.Point
-    xyz=(p.X,p.Y,p.Z)
-    eid=int(str(el.Id))
-    start_points.append({"element_id":eid,"point":[xyz[0],xyz[1],xyz[2]]})
-
-    if not direct_mode:
-        # find nearest segment
-        best=None
-        for seg in segments_for_nearest:
-            cpt,d,t=closest_point_on_line(xyz, seg)
-            if best is None or d<best[1]:
-                best=(cpt,d)
-        if not best:
-            # fallback direct
-            if xyz!=end_xyz:
-                connection_edges.append((xyz,end_xyz))
-                add_csv(eid,"direct_fallback",xyz,end_xyz)
-            continue
-        nearest=best[0]
-        drop=(xyz[0],xyz[1],nearest[2])
-        if not isclose(xyz[2], drop[2]):
-            connection_edges.append((xyz,drop))
-            add_csv(eid,"vertical_drop",xyz,drop)
-        if (not isclose(drop[0],nearest[0]) or
-            not isclose(drop[1],nearest[1]) or
-            not isclose(drop[2],nearest[2])):
-            connection_edges.append((drop,nearest))
-            add_csv(eid,"horizontal_jumper",drop,nearest)
-    else:
-        # star
-        if xyz!=end_xyz:
-            connection_edges.append((xyz,end_xyz))
-            add_csv(eid,"direct_no_infra",xyz,end_xyz)
-
-# Add infrastructure edges to CSV
-for e in infrastructure_edges:
-    add_csv("INFRA","infra_edge", e[0], e[1])
-
-# -------------------- EXPORT DEBUG CSV --------------------
-try:
-    script_path=os.path.abspath(__file__)
-    script_dir=os.path.dirname(script_path)
-except:
-    script_dir=os.getcwd()
-csv_path=os.path.join(script_dir,"run_network_debug.csv")
-with open(csv_path,"w") as f:
-    f.write("element_id,type,x1,y1,z1,x2,y2,z2,length\n")
-    for row in csv_rows:
-        i,typ,a,b,l=row
-        f.write("{},{},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f}\n".format(
-            i,typ,a[0],a[1],a[2],b[0],b[1],b[2],l))
-
-# -------------------- BUILD GRAPH (merge vertices) --------------------
-all_edges = list(infrastructure_edges) + list(connection_edges)
-vmap={}
-vertices=[]
-edges=[]
 def add_vertex(pt):
-    # Merge by tolerance
-    for existing,index in zip(vertices, range(len(vertices))):
-        if (abs(existing[0]-pt[0])<MERGE_TOL and
-            abs(existing[1]-pt[1])<MERGE_TOL and
-            abs(existing[2]-pt[2])<MERGE_TOL):
-            return index
-    idx=len(vertices)
+    nk=norm_key(pt)
+    idx=vertex_map.get(nk)
+    if idx is not None:
+        return idx
+    # search for near match (MERGE_TOL)
+    i=0
+    while i < len(vertices):
+        v=vertices[i]
+        if (abs(v[0]-pt[0])<=MERGE_TOL and
+            abs(v[1]-pt[1])<=MERGE_TOL and
+            abs(v[2]-pt[2])<=MERGE_TOL):
+            vertex_map[nk]=i
+            return i
+        i+=1
     vertices.append([pt[0],pt[1],pt[2]])
+    idx=len(vertices)-1
+    vertex_map[nk]=idx
     return idx
 
-for seg in all_edges:
-    i1=add_vertex(seg[0])
-    i2=add_vertex(seg[1])
-    if i1!=i2:
-        edges.append([i1,i2])
+def add_edge(i,j,edge_list):
+    if i==j: return
+    if i>j: i,j=j,i
+    # check duplicate
+    for (a,b) in edge_list:
+        if a==i and b==j:
+            return
+    edge_list.append([i,j])
 
-# -------------------- META --------------------
+# Fittings contribute their connectors as edges (like before)
+fittings_total=0
+fittings_lp_locationpoint=0
+fittings_lp_transform=0
+fittings_lp_none=0
+
+for el in fittings:
+    fittings_total+=1
+    lp, method = get_fitting_location_point(el)
+    if not lp:
+        fittings_lp_none+=1
+        continue
+    if method=="LocationPoint": fittings_lp_locationpoint+=1
+    elif method=="TransformOrigin": fittings_lp_transform+=1
+    fitting_points.append({
+        "element_id": to_int_id(el),
+        "method": method,
+        "point": [lp[0],lp[1],lp[2]]
+    })
+    cons=get_all_connectors(el)
+    if cons:
+        base_idx=add_vertex(lp)
+        for c in cons:
+            ci=add_vertex(c)
+            add_edge(ci, base_idx, infra_edges if FITTING_CONNECTOR_TO_POINT else infra_edges)
+    elif INCLUDE_FITTING_WITHOUT_CONNECTORS:
+        # just ensure vertex exists
+        add_vertex(lp)
+
+# Linear infrastructure
+linear_total=0; linear_curve_edges=0
+for el in linears:
+    loc=getattr(el,"Location",None)
+    if not (loc and isinstance(loc,LocationCurve) and loc.Curve): continue
+    pts=sample_curve(loc.Curve)
+    if len(pts)<2: continue
+    linear_total+=1
+    for a,b in zip(pts, pts[1:]):
+        if dist3(a,b)>1e-9:
+            ia=add_vertex(a); ib=add_vertex(b)
+            add_edge(ia,ib,infra_edges)
+            linear_curve_edges+=1
+
+# Devices
+devices=[]
+if selection_mode=="manual":
+    try:
+        refs=uidoc.Selection.PickObjects(ObjectType.Element,"Pick device elements")
+        for r in refs:
+            el=doc.GetElement(r.ElementId)
+            if el and el.Category and el.Category.Name in dchosen:
+                devices.append(el)
+    except Exception as e:
+        forms.alert("Device pick aborted:\n{0}".format(e), exitscript=True)
+else:
+    for cid in device_cat_ids:
+        col=(FilteredElementCollector(doc, active_view.Id)
+             .OfCategory(cid).WhereElementIsNotElementType())
+        for el in col: devices.append(el)
+
+device_points=[]
+for d in devices:
+    loc=getattr(d,"Location",None)
+    if loc and hasattr(loc,"Point") and loc.Point:
+        p=loc.Point
+        device_points.append((d,(p.X,p.Y,p.Z)))
+
+if not device_points:
+    forms.alert("No device point locations found.", exitscript=True)
+
+# END point selection
+forms.alert("Pick a FACE for End Point (sink)")
+try:
+    face_ref=uidoc.Selection.PickObject(ObjectType.Face,"Pick End Face")
+except Exception as e:
+    forms.alert("End face selection aborted:\n{0}".format(e), exitscript=True)
+
+from Autodesk.Revit.DB import UV
+def face_center(ref):
+    el=doc.GetElement(ref.ElementId)
+    geom=el.GetGeometryObjectFromReference(ref)
+    if not geom: return None
+    try:
+        bbox=geom.GetBoundingBox()
+        uv=UV((bbox.Min.U+bbox.Max.U)/2.0,(bbox.Min.V+bbox.Max.V)/2.0)
+        xyz=geom.Evaluate(uv)
+        return (xyz.X,xyz.Y,xyz.Z)
+    except: return None
+
+end_xyz=face_center(face_ref)
+if not end_xyz:
+    forms.alert("Failed computing end point.", exitscript=True)
+end_idx=add_vertex(end_xyz)  # self-edge not needed; vertex ensures presence
+
+# Build dynamic structure so we can split edges
+# We will store infra_edges as mutable list while splitting
+# Splitting algorithm:
+#   For each device:
+#       Iterate over ALL current infra_edges
+#         compute projection distance
+#       pick best edge (min distance)
+#       if projection interior (t in (0,1) and farther than PROJECTION_ENDPOINT_TOL from both ends):
+#           create new vertex p
+#           replace edge (a,b) with (a,p) and (p,b)
+#       else: use nearest endpoint
+#   Then create L edges from device to p (or endpoint) as configured.
+#
+def split_edge(edge_index, proj_pt, infra_edges):
+    a,b = infra_edges[edge_index]
+    # remove original
+    del infra_edges[edge_index]
+    p_idx = add_vertex(proj_pt)
+    add_edge(a, p_idx, infra_edges)
+    add_edge(p_idx, b, infra_edges)
+    return p_idx
+
+def project_device(device_pt):
+    best_edge_index=None
+    best_proj=None
+    best_t=None
+    best_dist=None
+    # Iterate over infra_edges
+    i=0
+    while i < len(infra_edges):
+        a_idx,b_idx = infra_edges[i]
+        a=vertices[a_idx]; b=vertices[b_idx]
+        proj, t, d = project_point_to_segment(device_pt, a, b)
+        if best_dist is None or d < best_dist:
+            best_dist=d; best_edge_index=i; best_proj=proj; best_t=t
+        i+=1
+    return best_edge_index, best_proj, best_t, best_dist
+
+# Process devices
+for d,(dx,dy,dz) in device_points:
+    dev_id=to_int_id(d)
+    device_vertex_idx = add_vertex((dx,dy,dz))
+    # record start point now (original device coordinate)
+    start_points.append({"element_id": dev_id if dev_id is not None else -1,
+                         "point":[dx,dy,dz]})
+    edge_idx, proj_pt, t_val, pdist = project_device((dx,dy,dz))
+    if edge_idx is None:
+        continue
+    a_idx,b_idx = infra_edges[edge_idx]
+    a=vertices[a_idx]; b=vertices[b_idx]
+    # Check closeness to endpoints
+    if dist3(proj_pt,a) <= PROJECTION_ENDPOINT_TOL:
+        proj_vertex_idx = a_idx
+    elif dist3(proj_pt,b) <= PROJECTION_ENDPOINT_TOL:
+        proj_vertex_idx = b_idx
+    else:
+        # interior split
+        proj_vertex_idx = split_edge(edge_idx, proj_pt, infra_edges)
+        if DEBUG_PROJECTION:
+            cprint("Split edge; new vertex", proj_vertex_idx)
+    # Create L edges
+    # vertical intermediate
+    if CREATE_VERTICAL_SEGMENT:
+        v_pt = (dx,dy,vertices[proj_vertex_idx][2])
+        if abs(v_pt[2]-dz) <= VERTICAL_MIN_LEN:
+            vertical_idx = device_vertex_idx  # no vertical needed
+        else:
+            vertical_idx = add_vertex(v_pt)
+            add_edge(device_vertex_idx, vertical_idx, device_edges)
+        if CREATE_HORIZONTAL_SEGMENT:
+            add_edge(vertical_idx, proj_vertex_idx, device_edges)
+        else:
+            # connect device (or vertical) directly if horizontal skipped
+            if vertical_idx != proj_vertex_idx:
+                add_edge(vertical_idx, proj_vertex_idx, device_edges)
+    else:
+        # direct diagonal to projection
+        add_edge(device_vertex_idx, proj_vertex_idx, device_edges)
+
+# Deduplicate edges already ensured by add_edge
+
 meta={
-    "version":"0.1.0-run",
-    "equipment_color_filter": color_filter,
-    "use_color_filter": use_color,
-    "runs_supported": RUN_SUPPORT,
-    "accepted_run_ids": accepted_run_ids,
-    "run_edges_count": len(run_edges),
-    "run_curve_samples": run_curve_samples,
-    "run_arcs_sampled": run_arcs_sampled,
-    "skipped_run_color": skipped_run_color,
-    "skipped_run_empty": skipped_run_empty,
-    "run_member_counts": run_member_counts[:30],
-    "run_member_color_cache": dict(list(run_member_color_cache.items())[:30]),
-    "run_errors_sample": run_errors[:10],
-    "include_residual": include_residual,
-    "residual_edge_count": len(residual_edges),
-    "residual_counts": residual_counts,
-    "residual_fail_samples": residual_fail[:10],
-    "segments_built": len(infrastructure_edges),
-    "direct_mode": direct_mode,
-    "electrical_elements_count": len(electrical),
-    "unit_notice": "All coordinates & lengths in internal feet."
+    "version":"2.7.0",
+    "vertex_count":len(vertices),
+    "infra_edge_count":len(infra_edges),
+    "device_edge_count":len(device_edges),
+    "device_count":len(start_points),
+    "projection_endpoint_tol":PROJECTION_ENDPOINT_TOL,
+    "merge_tol":MERGE_TOL,
+    "vertical_segment":CREATE_VERTICAL_SEGMENT,
+    "horizontal_segment":CREATE_HORIZONTAL_SEGMENT
 }
+
+# Combined edges list (infra first then device)
+combined_edges = infra_edges + device_edges
 
 graph_data={
-    "meta": meta,
-    "vertices": vertices,
-    "edges": edges,
-    "start_points": start_points,
-    "end_point": [end_xyz[0],end_xyz[1],end_xyz[2]]
+    "meta":meta,
+    "vertices":vertices,
+    "edges":combined_edges,
+    "infra_edges":infra_edges,
+    "device_edges":device_edges,
+    "start_points":start_points,
+    "end_point":[end_xyz[0],end_xyz[1],end_xyz[2]]
 }
 
+script_dir=os.path.dirname(__file__)
 json_path=os.path.join(script_dir,"topologic.JSON")
 with open(json_path,"w") as f:
     json.dump(graph_data,f,indent=2)
 
+cprint("EXPORT SUMMARY vertices={0} infraEdges={1} deviceEdges={2} totalEdges={3} devices={4}".format(
+    len(vertices), len(infra_edges), len(device_edges), len(combined_edges), len(start_points)
+))
+
 forms.alert(
-    "RUN graph built.\nVertices:{} Edges:{} Devices:{}\nRunEdges:{} ResidualEdges:{} DirectMode:{}\nJSON:{}\nCSV:{}"
-    .format(len(vertices), len(edges), len(start_points),
-            len(run_edges), len(residual_edges), direct_mode, json_path, csv_path)
+    "GRAPH DONE\nVertices:{0}\nInfraEdges:{1}\nDeviceEdges:{2}\nTotalEdges:{3}\nDevices:{4}\nJSON:\n{5}".format(
+        len(vertices), len(infra_edges), len(device_edges), len(combined_edges), len(start_points), json_path
+    ),
+    title="Cable Length Calculation"
 )
 
-# -------------------- RUN calc_shortest.py --------------------
-PYTHON3_PATH = r"C:\Users\JacksonAugusto\AppData\Local\Programs\Python\Python312\python.exe"
-calc_script=os.path.join(script_dir,"calc_shortest.py")
-if not os.path.exists(calc_script):
-    forms.alert("calc_shortest.py not found (skipping computation).", exitscript=False)
-else:
-    try:
-        subprocess.check_call([PYTHON3_PATH, calc_script], cwd=script_dir)
-    except Exception as e:
-        forms.alert("calc_shortest.py failed:\n{}".format(e), exitscript=False)
+# ---------- External Runner ----------
+import subprocess
 
-# -------------------- UPDATE PARAMETERS --------------------
-update_script=os.path.join(script_dir,"update_cable_lengths.py")
-if not os.path.exists(update_script):
-    forms.alert("update_cable_lengths.py not found.", exitscript=True)
-else:
-    try:
-        execfile(update_script)
-    except Exception as e:
-        forms.alert("Error executing update_cable_lengths.py:\n{}".format(e), exitscript=True)
+def run_external_or_internal(script_path, interpreter, args, allow_fallback, force_internal, log_basename,
+                             injected_globals=None):
+    import subprocess
+    external_ok=False
+    stdout_data=""; stderr_data=""
+    status=""
+    log_path=os.path.join(os.path.dirname(script_path), log_basename)
+    if (not force_internal) and interpreter and os.path.isfile(interpreter):
+        try:
+            cmd=[interpreter, script_path] + list(args)
+            proc=subprocess.Popen(cmd, cwd=os.path.dirname(script_path),
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  universal_newlines=True)
+            out,err=proc.communicate()
+            stdout_data, stderr_data = out, err
+            rc=proc.returncode
+            if rc==0:
+                external_ok=True
+                status="External OK rc=0"
+            else:
+                status="External FAILED rc={0}".format(rc)
+        except Exception as ex:
+            status="External exception: {0}".format(ex)
+    elif not force_internal:
+        status="External interpreter invalid: {0}".format(interpreter)
 
-forms.alert("Run-based Cable Length Calculation COMPLETE (run_script v0.1.0). Review results.")
+    if (force_internal or (not external_ok and allow_fallback)):
+        try:
+            g={}
+            if injected_globals: g.update(injected_globals)
+            g['__file__']=script_path; g['__name__']='__main__'
+            code=open(script_path,'r').read()
+            exec(compile(code, script_path, 'exec'), g, g)
+            if external_ok: status += "\nInternal EXEC SUCCESS."
+            else: status += "\nInternal fallback SUCCESS."
+        except Exception as ie:
+            tb=traceback.format_exc()
+            status += "\nInternal EXEC FAILED: {0}".format(ie)
+            stderr_data += "\n[INTERNAL TRACEBACK]\n{0}".format(tb)
+
+    try:
+        lf=open(log_path,"a")
+        lf.write("\n=== {0} | {1} ===\n".format(os.path.basename(script_path),
+                                                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        lf.write("STATUS: {0}\n".format(status))
+        if stdout_data:
+            lf.write("--- STDOUT ---\n"); lf.write(stdout_data); lf.write("\n")
+        if stderr_data:
+            lf.write("--- STDERR ---\n"); lf.write(stderr_data); lf.write("\n")
+        lf.close()
+    except: pass
+
+    return status, external_ok, stdout_data[:1200], stderr_data[:1200], log_path
+
+injected_globals = {
+    '__revit__': __revit__,
+    'uidoc': uidoc,
+    'doc': doc,
+    'active_view': active_view
+}
+
+def run_step(run_flag, script_name, force_internal, args_list, title):
+    if not run_flag:
+        return
+    spath=os.path.join(script_dir, script_name)
+    if not os.path.isfile(spath):
+        forms.alert("{0} not found: {1}".format(title, spath)); return
+    status, ext_ok, out_snip, err_snip, logpath = run_external_or_internal(
+        spath, PYTHON3_PATH, args_list, FALLBACK_INTERNAL_IF_EXTERNAL_FAILS,
+        force_internal, script_name + ".log",
+        injected_globals=injected_globals
+    )
+    forms.alert("{0} Step:\n{1}\n\nSTDOUT(first 600):\n{2}".format(title, status, out_snip[:600]),
+                title="{0} Result".format(script_name))
+
+run_step(RUN_CALC_SHORTEST, CALC_SCRIPT_NAME, FORCE_INTERNAL_CALC, CALC_ARGS, "Shortest Path")
+run_step(RUN_UPDATE_LENGTHS, UPDATE_SCRIPT_NAME, FORCE_INTERNAL_UPDATE, UPDATE_ARGS, "Update Lengths")
+
+if OPEN_FOLDER_AFTER:
+    try:
+        subprocess.Popen(r'explorer /select,"{0}"'.format(json_path))
+    except: pass

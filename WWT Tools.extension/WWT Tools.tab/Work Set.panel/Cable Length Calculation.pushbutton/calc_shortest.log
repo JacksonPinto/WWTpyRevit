@@ -1,0 +1,171 @@
+
+=== calc_shortest.py | 2025-08-28 12:53:21 ===
+INFO: External OK rc=0
+--- STDOUT ---
+[DEBUG] Script started
+[DEBUG] Loading JSON from: C:\Users\JacksonAugusto\Documents\GitHub\WWTpyRevit\WWT Tools.extension\WWT Tools.tab\Work Set.panel\Cable Length Calculation.pushbutton\topologic.JSON
+[DEBUG] Input vertices: 259
+[DEBUG] Input edges: 212
+[DEBUG] Start points: 50
+[DEBUG] End point: [-24.92229461134604, 29.45119062832499, 5.413385826771782]
+[DEBUG] Created 259 Topologic vertices, 212 Topologic edges.
+[DEBUG] Cluster created.
+[DEBUG] Self-merged topology created.
+[DEBUG] Topologic graph object created.
+[DEBUG] Graph vertex count: 257
+[WARN] Closest vertex to [-24.92229461134604, 29.45119062832499, 5.413385826771782] is at distance 0.656168 (idx 68)
+[DEBUG] End point maps to graph vertex index: 68 coords: (-24.922294611346047, 29.45119062832499, 4.7572178477691445)
+[WARN] Closest vertex to [2.4590116501088524, 18.26207847725815, 0.08202099737545046] is at distance 0.016404 (idx 146)
+[DEBUG] Start point 0 (ElementId None) maps to graph vertex index: 146 coords: (2.4590116501088524, 18.26207847725815, 0.09842519685051734)
+[WARN] Closest vertex to [-40.856279908968936, 43.8526296583604, 9.350393700787535] is at distance 0.295276 (idx 187)
+[DEBUG] Start point 1 (ElementId None) maps to graph vertex index: 187 coords: (-40.856279908968936, 43.8526296583604, 9.645669291338717)
+[WARN] Closest vertex to [-32.982264160937454, 51.72664540639187, 9.350393700787535] is at distance 0.295276 (idx 56)
+[DEBUG] Start point 2 (ElementId None) maps to graph vertex index: 56 coords: (-32.982264160937454, 51.72664540639187, 9.64566929133867)
+[WARN] Closest vertex to [-25.108248412905922, 43.85262965836045, 9.350393700787535] is at distance 0.295276 (idx 199)
+[DEBUG] Start point 3 (ElementId None) maps to graph vertex index: 199 coords: (-25.108248412905922, 43.85262965836045, 9.645669291338717)
+[WARN] Closest vertex to [-17.23423266487444, 51.72664540639192, 9.350393700787535] is at distance 0.295276 (idx 54)
+[DEBUG] Start point 4 (ElementId None) maps to graph vertex index: 54 coords: (-17.23423266487444, 51.72664540639192, 9.645669291338706)
+[WARN] Closest vertex to [-9.360216916842944, 43.8526296583605, 9.350393700787535] is at distance 0.295276 (idx 251)
+[DEBUG] Start point 5 (ElementId None) maps to graph vertex index: 251 coords: (-9.360216916842944, 43.8526296583605, 9.645669291338676)
+[WARN] Closest vertex to [-66.43075212941916, 39.88282679313713, 9.36023622047257] is at distance 0.290354 (idx 168)
+[DEBUG] Start point 6 (ElementId None) maps to graph vertex index: 168 coords: (-66.43075212941916, 39.88282679313713, 9.650590551181232)
+[WARN] Closest vertex to [-58.56206774621692, 39.88282679313713, 9.36023622047257] is at distance 0.290354 (idx 178)
+[DEBUG] Start point 7 (ElementId None) maps to graph vertex index: 178 coords: (-58.56206774621692, 39.88282679313713, 9.650590551181232)
+[WARN] Closest vertex to [-50.68805199818532, 39.88282679313713, 9.36023622047257] is at distance 0.290354 (idx 180)
+[DEBUG] Start point 8 (ElementId None) maps to graph vertex index: 180 coords: (-50.68805199818532, 39.88282679313713, 9.65059055118123)
+[WARN] Closest vertex to [-66.43075212941916, 32.00881104510563, 9.36023622047257] is at distance 0.290354 (idx 212)
+[DEBUG] Start point 9 (ElementId None) maps to graph vertex index: 212 coords: (-66.43075212941916, 32.00881104510563, 9.650590551181233)
+[WARN] Closest vertex to [-58.5620677462169, 32.00881104510563, 9.36023622047257] is at distance 0.290354 (idx 209)
+[DEBUG] Start point 10 (ElementId None) maps to graph vertex index: 209 coords: (-58.5620677462169, 32.00881104510563, 9.65059055118123)
+[WARN] Closest vertex to [-50.688051998185415, 32.00881104510563, 9.36023622047257] is at distance 0.290354 (idx 204)
+[DEBUG] Start point 11 (ElementId None) maps to graph vertex index: 204 coords: (-50.688051998185415, 32.00881104510563, 9.65059055118123)
+[WARN] Closest vertex to [-66.4360834942484, 24.134795297074135, 9.36023622047257] is at distance 0.290354 (idx 41)
+[DEBUG] Start point 12 (ElementId None) maps to graph vertex index: 41 coords: (-66.4360834942484, 24.134795297074135, 9.650590551181235)
+[WARN] Closest vertex to [-58.55140501655812, 24.134795297074135, 9.36023622047257] is at distance 0.290354 (idx 25)
+[DEBUG] Start point 13 (ElementId None) maps to graph vertex index: 25 coords: (-58.551405016558114, 24.134795297074135, 9.650590551181232)
+[WARN] Closest vertex to [-50.6880519981854, 24.134795297074135, 9.36023622047257] is at distance 0.290354 (idx 42)
+[DEBUG] Start point 14 (ElementId None) maps to graph vertex index: 42 coords: (-50.6880519981854, 24.134795297074135, 9.650590551181232)
+[WARN] Closest vertex to [-62.49374425540339, 35.94581891912151, 9.350393700787535] is at distance 0.295276 (idx 200)
+[DEBUG] Start point 15 (ElementId None) maps to graph vertex index: 200 coords: (-62.49374425540339, 35.94581891912151, 9.645669291338717)
+[WARN] Closest vertex to [-62.49374425540339, 28.071803171090014, 9.350393700787535] is at distance 0.295276 (idx 192)
+[DEBUG] Start point 16 (ElementId None) maps to graph vertex index: 192 coords: (-62.493744255403385, 28.071803171090014, 9.645669291338713)
+[WARN] Closest vertex to [-1.4862011688114571, 51.72664540639197, 9.350393700787535] is at distance 0.295276 (idx 27)
+[DEBUG] Start point 17 (ElementId None) maps to graph vertex index: 27 coords: (-1.4862011688114571, 51.72664540639197, 9.645669291338677)
+[WARN] Closest vertex to [-19.222230439764843, 14.292275612034771, 9.350393700787535] is at distance 0.295276 (idx 115)
+[DEBUG] Start point 18 (ElementId None) maps to graph vertex index: 115 coords: (-19.222230439764843, 14.292275612034771, 9.645669291338713)
+[WARN] Closest vertex to [-19.222230439764836, 8.386763801011142, 9.350393700787535] is at distance 0.295276 (idx 86)
+[DEBUG] Start point 19 (ElementId None) maps to graph vertex index: 86 coords: (-19.222230439764836, 8.386763801011142, 9.645669291338715)
+[WARN] Closest vertex to [-9.396114954200545, 14.292275612034752, 9.350393700787535] is at distance 0.295276 (idx 133)
+[DEBUG] Start point 20 (ElementId None) maps to graph vertex index: 133 coords: (-9.396114954200545, 14.292275612034752, 9.64566929133871)
+[WARN] Closest vertex to [-9.396114954200538, 8.386763801011123, 9.350393700787535] is at distance 0.295276 (idx 70)
+[DEBUG] Start point 21 (ElementId None) maps to graph vertex index: 70 coords: (-9.396114954200538, 8.386763801011123, 9.645669291338717)
+[WARN] Closest vertex to [4.465433602229897, 14.292275612034723, 9.350393700787535] is at distance 0.295276 (idx 141)
+[DEBUG] Start point 22 (ElementId None) maps to graph vertex index: 141 coords: (4.465433602229897, 14.292275612034723, 9.645669291338717)
+[WARN] Closest vertex to [4.465433602229904, 8.386763801011094, 9.350393700787535] is at distance 0.295276 (idx 82)
+[DEBUG] Start point 23 (ElementId None) maps to graph vertex index: 82 coords: (4.465433602229904, 8.386763801011094, 9.645669291338718)
+[WARN] Closest vertex to [-24.30451599894429, 23.258811623747235, 4.043938058726103] is at distance 2.948503 (idx 123)
+[DEBUG] Start point 24 (ElementId None) maps to graph vertex index: 123 coords: (-24.30451599894429, 23.25881162374724, 6.992441470307996)
+[WARN] Closest vertex to [-45.883777327921734, 44.205690559215014, 4.757217847769157] is at distance 2.321194 (idx 173)
+[DEBUG] Start point 25 (ElementId None) maps to graph vertex index: 173 coords: (-45.883777327921734, 44.205690559215014, 2.43602362204737)
+[WARN] Closest vertex to [-58.04927332567475, 17.903458594483215, 4.757217847769203] is at distance 2.321194 (idx 35)
+[DEBUG] Start point 26 (ElementId None) maps to graph vertex index: 35 coords: (-58.04927332567475, 17.903458594483215, 2.4360236220473936)
+[WARN] Closest vertex to [-14.759328071225667, 39.41435641003296, 4.757217847769205] is at distance 2.591864 (idx 98)
+[DEBUG] Start point 27 (ElementId None) maps to graph vertex index: 98 coords: (-14.759328071225667, 39.41435641003296, 7.3490813648295426)
+[WARN] Closest vertex to [-4.960465776058199, 30.28552560456864, 4.757217847769217] is at distance 2.321194 (idx 130)
+[DEBUG] Start point 28 (ElementId None) maps to graph vertex index: 130 coords: (-4.960465776058199, 30.285525604568637, 2.4360236220474007)
+[WARN] Closest vertex to [-4.373340276423036, 17.245018109804224, 4.757217847769219] is at distance 2.591864 (idx 134)
+[DEBUG] Start point 29 (ElementId None) maps to graph vertex index: 134 coords: (-4.373340276423036, 17.245018109804224, 7.3490813648295505)
+[WARN] Closest vertex to [-62.493744255403385, 32.00881104510563, 9.350393700787535] is at distance 0.295276 (idx 219)
+[DEBUG] Start point 30 (ElementId None) maps to graph vertex index: 219 coords: (-62.49374425540338, 32.00881104510563, 9.645669291338713)
+[WARN] Closest vertex to [-15.198960617157546, 47.77528488772133, 9.350393700787535] is at distance 0.295276 (idx 235)
+[DEBUG] Start point 31 (ElementId None) maps to graph vertex index: 235 coords: (-15.198960617157548, 47.77528488772133, 9.645669291338715)
+[WARN] Closest vertex to [-9.360216916842944, 12.355267738019075, 9.350393700787535] is at distance 0.295276 (idx 149)
+[DEBUG] Start point 32 (ElementId None) maps to graph vertex index: 149 coords: (-9.360216916842944, 12.355267738019075, 9.64566929133871)
+[WARN] Closest vertex to [-62.920518550217125, 44.313342630503804, 4.757217847769207] is at distance 2.321194 (idx 48)
+[DEBUG] Start point 33 (ElementId None) maps to graph vertex index: 48 coords: (-62.920518550217125, 44.313342630503804, 2.4360236220473954)
+[WARN] Closest vertex to [-54.52846236729464, 31.553852431404323, 6.145013123359696] is at distance 1.897966 (idx 220)
+[DEBUG] Start point 34 (ElementId None) maps to graph vertex index: 220 coords: (-54.52846236729464, 31.553852431404323, 8.042979002624794)
+[WARN] Closest vertex to [-47.79723744716505, 12.326030772960896, 4.970472287486524] is at distance 2.427821 (idx 52)
+[DEBUG] Start point 35 (ElementId None) maps to graph vertex index: 52 coords: (-47.79723744716505, 12.326030772960896, 2.5426508419060574)
+[WARN] Closest vertex to [-70.1058081678193, 12.326030772961024, 4.9442255683264245] is at distance 2.414698 (idx 39)
+[DEBUG] Start point 36 (ElementId None) maps to graph vertex index: 39 coords: (-70.1058081678193, 12.326030772961024, 2.5295274823260074)
+[WARN] Closest vertex to [2.459011650108833, 18.051400622980164, 4.101049868766518] is at distance 1.993110 (idx 132)
+[DEBUG] Start point 37 (ElementId None) maps to graph vertex index: 132 coords: (2.459011650108833, 18.051400622980164, 2.107939632546051)
+[WARN] Closest vertex to [8.437868605489154, 11.297959915034067, 4.970472287486523] is at distance 2.427821 (idx 120)
+[DEBUG] Start point 38 (ElementId None) maps to graph vertex index: 120 coords: (8.437868605489154, 11.297959915034067, 2.5426508419060534)
+[WARN] Closest vertex to [-69.68631025789614, 49.8080753197833, 4.101049868766532] is at distance 1.993110 (idx 50)
+[DEBUG] Start point 39 (ElementId None) maps to graph vertex index: 50 coords: (-69.68631025789614, 49.8080753197833, 2.1079396325460626)
+[WARN] Closest vertex to [-46.11967383248961, 48.41439249927009, 6.233595800525074] is at distance 1.853675 (idx 226)
+[DEBUG] Start point 40 (ElementId None) maps to graph vertex index: 226 coords: (-46.11967383248961, 48.41439249927009, 8.087270341207379)
+[WARN] Closest vertex to [-46.760417747871315, 49.80874945465074, 4.429133858267848] is at distance 2.157152 (idx 254)
+[DEBUG] Start point 41 (ElementId None) maps to graph vertex index: 254 coords: (-46.760417747871315, 49.80874945465074, 2.271981627296715)
+[WARN] Closest vertex to [-15.691086601409433, 31.75049450610784, 4.101049868766532] is at distance 1.993110 (idx 80)
+[DEBUG] Start point 42 (ElementId None) maps to graph vertex index: 80 coords: (-15.691086601409433, 31.75049450610784, 2.107939632546058)
+[WARN] Closest vertex to [-4.714402783932319, 24.134781889331645, 5.4133858267717105] is at distance 2.649278 (idx 156)
+[DEBUG] Start point 43 (ElementId None) maps to graph vertex index: 156 coords: (-4.714402783932319, 24.134781889331645, 2.7641076115486474)
+[WARN] Closest vertex to [2.466739996565095, 22.167645616517838, 9.360236220472563] is at distance 0.290354 (idx 140)
+[DEBUG] Start point 44 (ElementId None) maps to graph vertex index: 140 coords: (2.466739996565095, 22.167645616517838, 9.650590551181224)
+[WARN] Closest vertex to [-46.87860227656076, 23.21956061739995, 4.101049868766531] is at distance 2.919948 (idx 60)
+[DEBUG] Start point 45 (ElementId None) maps to graph vertex index: 60 coords: (-46.87860227656077, 23.21956061739995, 7.020997375328207)
+[WARN] Closest vertex to [-20.612346443929052, 26.101221498372823, 4.101049868766396] is at distance 1.688398 (idx 88)
+[DEBUG] Start point 46 (ElementId None) maps to graph vertex index: 88 coords: (-20.81805510534635, 27.777040731033296, 4.101049868766465)
+[WARN] Closest vertex to [-46.549459742622545, 18.03583358327948, 4.72870865312522] is at distance 2.606118 (idx 61)
+[DEBUG] Start point 47 (ElementId None) maps to graph vertex index: 61 coords: (-46.549459742622545, 18.03583358327948, 7.33482676750755)
+[WARN] Closest vertex to [-20.612346443929052, 26.10289083374172, 4.101049868766533] is at distance 1.686741 (idx 88)
+[DEBUG] Start point 48 (ElementId None) maps to graph vertex index: 88 coords: (-20.81805510534635, 27.777040731033296, 4.101049868766465)
+[WARN] Closest vertex to [-27.99668555395946, 22.92531968088422, 4.10104986876653] is at distance 3.606899 (idx 85)
+[DEBUG] Start point 49 (ElementId None) maps to graph vertex index: 85 coords: (-26.45949008265275, 26.188255154604605, 4.101049868766507)
+[DEBUG] Shortest path for start 0 (ElementId None): length=53.046, vertex_count=19
+[DEBUG] Shortest path for start 1 (ElementId None): length=50.614, vertex_count=23
+[DEBUG] Shortest path for start 2 (ElementId None): length=54.708, vertex_count=27
+[DEBUG] Shortest path for start 3 (ElementId None): length=35.615, vertex_count=23
+[DEBUG] Shortest path for start 4 (ElementId None): length=49.524, vertex_count=27
+[DEBUG] Shortest path for start 5 (ElementId None): length=45.674, vertex_count=27
+[DEBUG] Shortest path for start 6 (ElementId None): length=74.845, vertex_count=29
+[DEBUG] Shortest path for start 7 (ElementId None): length=66.976, vertex_count=28
+[DEBUG] Shortest path for start 8 (ElementId None): length=59.145, vertex_count=27
+[DEBUG] Shortest path for start 9 (ElementId None): length=85.482, vertex_count=36
+[DEBUG] Shortest path for start 10 (ElementId None): length=77.550, vertex_count=32
+[DEBUG] Shortest path for start 11 (ElementId None): length=69.801, vertex_count=30
+[DEBUG] Shortest path for start 12 (ElementId None): length=91.879, vertex_count=35
+[DEBUG] Shortest path for start 13 (ElementId None): length=83.995, vertex_count=34
+[DEBUG] Shortest path for start 14 (ElementId None): length=76.177, vertex_count=33
+[DEBUG] Shortest path for start 15 (ElementId None): length=87.499, vertex_count=37
+[DEBUG] Shortest path for start 16 (ElementId None): length=84.326, vertex_count=36
+[DEBUG] Shortest path for start 17 (ElementId None): length=65.180, vertex_count=28
+[DEBUG] Shortest path for start 18 (ElementId None): length=37.159, vertex_count=24
+[DEBUG] Shortest path for start 19 (ElementId None): length=46.916, vertex_count=27
+[DEBUG] Shortest path for start 20 (ElementId None): length=46.842, vertex_count=25
+[DEBUG] Shortest path for start 21 (ElementId None): length=56.547, vertex_count=28
+[DEBUG] Shortest path for start 22 (ElementId None): length=60.816, vertex_count=31
+[DEBUG] Shortest path for start 23 (ElementId None): length=70.380, vertex_count=29
+[DEBUG] Shortest path for start 24 (ElementId None): length=28.792, vertex_count=20
+[DEBUG] Shortest path for start 25 (ElementId None): length=46.957, vertex_count=19
+[DEBUG] Shortest path for start 26 (ElementId None): length=74.118, vertex_count=22
+[DEBUG] Shortest path for start 27 (ElementId None): length=41.091, vertex_count=26
+[DEBUG] Shortest path for start 28 (ElementId None): length=33.302, vertex_count=14
+[DEBUG] Shortest path for start 29 (ElementId None): length=53.673, vertex_count=27
+[DEBUG] Shortest path for start 30 (ElementId None): length=83.654, vertex_count=36
+[DEBUG] Shortest path for start 31 (ElementId None): length=44.602, vertex_count=26
+[DEBUG] Shortest path for start 32 (ElementId None): length=49.528, vertex_count=26
+[DEBUG] Shortest path for start 33 (ElementId None): length=62.280, vertex_count=25
+[DEBUG] Shortest path for start 34 (ElementId None): length=74.575, vertex_count=31
+[DEBUG] Shortest path for start 35 (ElementId None): length=87.620, vertex_count=26
+[DEBUG] Shortest path for start 36 (ElementId None): length=92.273, vertex_count=26
+[DEBUG] Shortest path for start 37 (ElementId None): length=55.173, vertex_count=20
+[DEBUG] Shortest path for start 38 (ElementId None): length=67.974, vertex_count=24
+[DEBUG] Shortest path for start 39 (ElementId None): length=73.542, vertex_count=29
+[DEBUG] Shortest path for start 40 (ElementId None): length=70.453, vertex_count=28
+[DEBUG] Shortest path for start 41 (ElementId None): length=52.216, vertex_count=20
+[DEBUG] Shortest path for start 42 (ElementId None): length=21.691, vertex_count=13
+[DEBUG] Shortest path for start 43 (ElementId None): length=51.642, vertex_count=18
+[DEBUG] Shortest path for start 44 (ElementId None): length=63.992, vertex_count=31
+[DEBUG] Shortest path for start 45 (ElementId None): length=77.322, vertex_count=32
+[DEBUG] Shortest path for start 46 (ElementId None): length=12.949, vertex_count=12
+[DEBUG] Shortest path for start 47 (ElementId None): length=81.745, vertex_count=34
+[DEBUG] Shortest path for start 48 (ElementId None): length=12.949, vertex_count=12
+Wire.ByVertices - Warning: The wire is made of only one edge.
+Wire.ByVertices - Warning: The wire is made of only one edge.
+[DEBUG] Shortest path for start 49 (ElementId None): length=3.666, vertex_count=2
+[DEBUG] Results written to: C:\Users\JacksonAugusto\Documents\GitHub\WWTpyRevit\WWT Tools.extension\WWT Tools.tab\Work Set.panel\Cable Length Calculation.pushbutton\topologic_results.json
+
