@@ -1,13 +1,3 @@
-# pyRevit bundle.yaml to organize ProjectTracker panel buttons in a logical sequence
-
-title: Project Tracker
-tooltip: "Track project time, manual entries, and export logs for analysis."
+title: Manual Entry
+tooltip: "Manually log time for meetings, emails, or other activities."
 author: Jackson Pinto
-
-# Panel order and button sequence
-contents:
-  - Start Timer.pushbutton
-  - Stop Timer.pushbutton
-  - Manual Entry.pushbutton
-  - Settings.pushbutton
-  - Show CSV.pushbutton
